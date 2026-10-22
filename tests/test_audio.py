@@ -144,7 +144,8 @@ def fake_clean(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _args(**kw: object) -> argparse.Namespace:
-    base = {"cut": None, "parts": False, "start": None, "duration": None, "force": True}
+    base: dict[str, object] = {"cut": None, "parts": False, "start": None, "duration": None}
+    base["force"] = True
     base.update(kw)
     return argparse.Namespace(steady=False, **base)
 
