@@ -30,7 +30,7 @@ class Origin:
 
     @property
     def reasons(self) -> str:
-        return "NO OSD" if self.digital else ""
+        return "no OSD" if self.digital else ""
 
 
 def judge(info: VideoInfo, meas: Measured) -> Origin:

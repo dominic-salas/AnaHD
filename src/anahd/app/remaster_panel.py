@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -84,13 +84,14 @@ class RemasterPanel(QScrollArea):
             rows.setSpacing(4)
             for item in members:
                 rows.addWidget(self._build(item))
-            title = str(info["title"]).upper()
+            title = str(info["title"])
 
             def fold(
                 _: bool = False, s: QWidget = section, h: QPushButton = header, t: str = title
             ) -> None:
                 s.setVisible(not s.isVisible())
                 h.setText(("▾  " if s.isVisible() else "▸  ") + t)
+                self.updateGeometry()  # an opened section may need more width
 
             section.setVisible(not info.get("collapsed", False))
             header.setText(("▾  " if section.isVisible() else "▸  ") + title)
@@ -98,7 +99,7 @@ class RemasterPanel(QScrollArea):
             column.addWidget(header)
             column.addWidget(section)
             self.sections[group] = section
-        self.reset_button = QPushButton("RESET TO DEFAULTS")
+        self.reset_button = QPushButton("Reset to defaults")
         self.reset_button.clicked.connect(self.reset)
         column.addSpacing(8)
         column.addWidget(self.reset_button)
@@ -109,6 +110,16 @@ class RemasterPanel(QScrollArea):
         column.addStretch(1)
         self.setWidget(body)
         self._update_needs()
+
+    def minimumSizeHint(self) -> QSize:
+        """Never narrower than the widest row (there is no sideways scrolling), so labels,
+        values and buttons are not cut off whatever the font."""
+        hint = super().minimumSizeHint()
+        body = self.widget()
+        if body is None:
+            return hint
+        width = body.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width()
+        return QSize(max(hint.width(), width), hint.height())
 
     # ----- building -----
 
@@ -277,9 +288,9 @@ class RemasterPanel(QScrollArea):
         row.addWidget(self._cost(item))
         lay.addLayout(row)
         if item.get("experimental"):
-            note = QLabel("EXPERIMENTAL: " + str(item.get("help", "")))
+            note = QLabel("Experimental: " + str(item.get("help", "")))
             note.setWordWrap(True)
-            note.setStyleSheet("color: #e5322d; font-size: 8pt;")
+            note.setProperty("role", "warning")
             lay.addWidget(note)
 
         def flipped(_on: bool) -> None:
@@ -296,7 +307,7 @@ class RemasterPanel(QScrollArea):
             if pct is None:
                 label.hide()
                 continue
-            label.setText("<1 % SPEED" if pct < 0.5 else f"-{pct:.0f} % SPEED")
+            label.setText("<1 % speed" if pct < 0.5 else f"-{pct:.0f} % speed")
             label.setToolTip("How much slower the clean is with this on, the rest as chosen")
             label.show()
 
@@ -305,8 +316,8 @@ class RemasterPanel(QScrollArea):
         edit = QLineEdit()
         edit.setReadOnly(True)
         edit.setPlaceholderText("(default)")
-        browse = QPushButton("CHOOSE...")
-        clear = QPushButton("CLEAR")
+        browse = QPushButton("Choose...")
+        clear = QPushButton("Clear")
         row = QHBoxLayout()
         row.addWidget(edit, 1)
         row.addWidget(browse)

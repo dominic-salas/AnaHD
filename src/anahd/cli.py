@@ -20,7 +20,16 @@ from pathlib import Path
 from anahd import __version__, bundle
 from anahd.cuts import keep_spans, parse_cut
 from anahd.errors import AnaHDError, MediaError, OutputExistsError
-from anahd.media import NO_WINDOW, count_frames, probe, require
+from anahd.media import (
+    NO_WINDOW,
+    AudioSpan,
+    add_audio,
+    count_frames,
+    first_frame_time,
+    probe,
+    require,
+    sound_clock,
+)
 from anahd.pipeline import Measured, Options, Result, enhance, measure, verify
 from anahd.remaster.params import NO_LOOK, RemasterParams, schema
 from anahd.steady import SteadyConfig
@@ -236,10 +245,26 @@ def render(
     steady = SteadyConfig() if args.steady else None
     remaster = remaster_params(args)
     temps: list[Path] = []
+    clock = sound_clock(src)  # None: the recording has no sound
+    info = probe(src)
+    rate = _fps(info.fps)
+
+    def with_sound(video: Path, spans: list[AudioSpan]) -> None:
+        """Put the recording's sound for ``spans`` into ``video`` (in place)."""
+        if clock is None:
+            return
+        sounded = video.with_name(f"{video.stem}.sound{video.suffix}")
+        temps.append(sounded)
+        add_audio(video, src, spans, sounded)
+        sounded.replace(video)
+
+    def sound_of(seek: float | None, frames: int) -> AudioSpan:
+        start = first_frame_time(clock, rate, seek) if clock is not None else 0.0
+        return AudioSpan(start, frames / rate)
+
     try:
         if cuts:
-            info = probe(src)
-            fps = _fps(info.fps)
+            fps = rate
             spans = keep_spans(cuts, packets or 0, fps)
             if not spans:
                 raise AnaHDError("the cuts leave nothing of the recording")
@@ -248,7 +273,7 @@ def render(
             _check_free(finals, args.force)
             expected = sum(s.frames for s in spans)
             measured = measure(src, info, Options())  # one look for every part
-            frames, made = 0, []
+            frames, made, sounds = 0, [], []
             for n, span in enumerate(spans):
                 part = (
                     partial_output(finals[n])
@@ -273,15 +298,19 @@ def render(
                 verify(part_result.frames, part)
                 frames += part_result.frames
                 made.append(part)
+                sounds.append(sound_of(opts.start, part_result.frames))
             result = replace(part_result, frames=frames)
             if separate:
                 _check_free(finals, args.force)  # none appeared while cleaning
+                for part, sound in zip(made, sounds, strict=True):
+                    with_sound(part, [sound])
                 for part, final in zip(made, finals, strict=True):
                     part.replace(final)
                 return result, time.monotonic() - began
             tmp = partial_output(out)
             temps.append(tmp)
             join(made, tmp)
+            with_sound(tmp, sounds)
         else:
             _check_free([out], args.force)
             tmp = partial_output(out)
@@ -296,6 +325,7 @@ def render(
                 packets * (1 - MAX_UNREADABLE) - 1 <= result.frames <= packets
             ):
                 raise AnaHDError(f"{src}: read {result.frames} of {packets} frames")
+            with_sound(tmp, [sound_of(args.start, result.frames)])
         verify(result.frames, tmp)
         _check_free([out], args.force)  # it did not appear while cleaning
         tmp.replace(out)

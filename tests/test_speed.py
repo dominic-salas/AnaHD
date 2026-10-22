@@ -24,7 +24,7 @@ def test_warns_below_18_fps_and_not_at_the_defaults() -> None:
     fps, warning = estimate(RemasterParams(), True)
     assert fps > 18 and warning is None
     fps, warning = estimate(ALL_FOUR, True)
-    assert fps < 18 and warning is not None and "10.1 MINUTES" in warning
+    assert fps < 18 and warning is not None and "10.1 minutes" in warning
     assert estimate(ALL_FOUR.with_(osd_redraw=True), False)[1] is not None
 
 

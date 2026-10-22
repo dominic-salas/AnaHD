@@ -85,7 +85,7 @@ class Wipe(QWidget):
             painter.fillRect(right, QColor(p.surface_2))
             painter.setPen(QColor(p.faint))
             painter.drawText(
-                right, Qt.AlignmentFlag.AlignCenter, self._message or "NOT CLEANED YET"
+                right, Qt.AlignmentFlag.AlignCenter, self._message or "Not cleaned yet"
             )
         painter.setPen(QPen(QColor("#ffffff"), 2))
         painter.drawLine(cut, box.top(), cut, box.bottom())
@@ -97,14 +97,14 @@ class Wipe(QWidget):
             x = box.left() + 10 if left else box.right() - width - 10
             r = QRectF(x, box.top() + 10, width, 20)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 160))
-            painter.drawRoundedRect(r, 4, 4)
-            painter.setPen(QColor("#ededed"))
+            painter.setBrush(QColor(0, 0, 0, 166))
+            painter.drawRect(r)
+            painter.setPen(QColor("#ffffff"))
             painter.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
-        tag("BEFORE  PLAIN UPSCALE", True)
+        tag("Before · plain upscale", True)
         if self._after is not None:
-            tag("AFTER  ANAHD", False)
+            tag("After · AnaHD", False)
         painter.end()
 
 

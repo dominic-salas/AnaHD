@@ -1,5 +1,5 @@
 """Things drawn in code, so no image or font file has to ship: the app icon, the
-dot-matrix title and the status dot (after FPV Editor's)."""
+dot-matrix title and the status dot (after FPV Editor's), in dvsalas.com's colours."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ def icon_pixmap(size: int) -> QPixmap:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     s = float(size)
     gradient = QLinearGradient(0, 0, s, s)
-    gradient.setColorAt(0.0, QColor("#2b2b2b"))
-    gradient.setColorAt(1.0, QColor("#0a0a0a"))
+    gradient.setColorAt(0.0, QColor("#2a2a2a"))
+    gradient.setColorAt(1.0, QColor("#121212"))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(gradient)
     tile = QRectF(0.04 * s, 0.04 * s, 0.92 * s, 0.92 * s)
@@ -33,7 +33,7 @@ def icon_pixmap(size: int) -> QPixmap:
     for i in range(lines):
         y = top + i * step - height / 2
         jag = (0.06, -0.04, 0.09, -0.07, 0.03, 0.08, -0.05)[i % 7] * s
-        painter.setBrush(QColor(229, 50, 45, 150 if i % 2 else 210))
+        painter.setBrush(QColor(242, 169, 59, 150 if i % 2 else 210))
         painter.drawRect(QRectF(0.16 * s + jag, y, 0.34 * s - jag, height))
         painter.setBrush(QColor(237, 237, 237, 235))
         painter.drawRect(QRectF(0.52 * s, y, 0.32 * s, height))
@@ -71,7 +71,7 @@ class DotTitle(QWidget):
         self._accent_letters = accent
         self._cell = cell
         self._colour = QColor("#ededed")
-        self._accent = QColor("#e5322d")
+        self._accent = QColor("#f2a93b")
         self.setFixedSize((6 * len(self._text) - 1) * cell, ROWS * cell)
 
     def set_colours(self, colour: str, accent: str) -> None:
@@ -102,8 +102,8 @@ class StatusDot(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setFixedSize(10, 10)
-        self._idle = QColor("#6e6e6e")
-        self._accent = QColor("#e5322d")
+        self._idle = QColor("#8c8c8c")
+        self._accent = QColor("#f2a93b")
         self._busy = False
         self._phase = 0
         self._timer = QTimer(self)
@@ -146,7 +146,7 @@ class Spinner(QWidget):
         self.setFixedSize(22, 22)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._angle = 0
-        self._colour = QColor("#e5322d")
+        self._colour = QColor("#f2a93b")
         self._timer = QTimer(self)
         self._timer.setInterval(40)
         self._timer.timeout.connect(self._tick)

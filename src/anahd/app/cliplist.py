@@ -158,7 +158,7 @@ class ClipCard(QStyledItemDelegate):
         painter.setFont(mono)
         metrics = painter.fontMetrics()
         painter.setPen(QColor(p.faint))
-        details = str(index.data(DETAILS) or "READING...")
+        details = str(index.data(DETAILS) or "Reading...")
         painter.drawText(
             lines[1], left, metrics.elidedText(details, Qt.TextElideMode.ElideRight, width)
         )
