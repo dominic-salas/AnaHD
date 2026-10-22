@@ -137,7 +137,7 @@ class FrameReader(QThread):
         rate = info.fps.split("/")
         fps = int(rate[0]) / max(int(rate[1]) if len(rate) > 1 else 1, 1)
         minutes, secs = divmod(round(info.duration), 60)
-        details = f"{minutes}:{secs:02d}   {info.width}x{info.height}   {fps:.0f} FPS"
+        details = f"{minutes}:{secs:02d}   {info.width}x{info.height}   {fps:.0f} fps"
         # The preview's shape is the one shown: stored width times the pixel shape (and
         # 4:3 for SD DVR sizes), as the cleaned output will have it.
         shown = output_size(

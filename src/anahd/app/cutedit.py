@@ -15,6 +15,13 @@ from anahd.cuts import parse_time
 STEPS = (-0.5, 0.5)  # seconds per click, like FPVEdit's trim buttons
 
 
+def mark(field: QLineEdit, invalid: bool) -> None:
+    """Outline ``field`` in the accent colour while its text is not a usable time."""
+    field.setProperty("invalid", invalid)
+    field.style().unpolish(field)
+    field.style().polish(field)
+
+
 def fmt_time(seconds: float) -> str:
     """m:ss.mmm"""
     ms = round(seconds * 1000)
@@ -32,7 +39,7 @@ class CutEditor(QStackedWidget):
         self.fps = 60.0
         self._cut = (0.0, 0.0)
 
-        hint = QLabel("SELECT A CUT ON THE TIMELINE TO SET ITS START AND END EXACTLY")
+        hint = QLabel("Select a cut on the timeline to set its start and end exactly")
         hint.setProperty("role", "eyebrow")
         self.addWidget(hint)
 
@@ -46,7 +53,7 @@ class CutEditor(QStackedWidget):
         row.addSpacing(8)
         self.start = self._field("Start of the cut (m:ss.mmm or seconds)")
         self.end = self._field("End of the cut (m:ss.mmm or seconds)")
-        for label, field, edge in (("START", self.start, 0), ("END", self.end, 1)):
+        for label, field, edge in (("Start", self.start, 0), ("End", self.end, 1)):
             caption = QLabel(label)
             caption.setProperty("role", "eyebrow")
             row.addWidget(caption)
@@ -54,12 +61,12 @@ class CutEditor(QStackedWidget):
             for step in STEPS:
                 way = "later" if step > 0 else "earlier"
                 tip = f"Move the cut's {label.lower()} {abs(step):g} s {way}"
-                row.addWidget(self._button(f"{step:+g}S", partial(self._nudge, edge, step), tip))
-            here = "START HERE" if edge == 0 else "END HERE"
+                row.addWidget(self._button(f"{step:+g}s", partial(self._nudge, edge, step), tip))
+            here = "Start here" if edge == 0 else "End here"
             row.addWidget(self._button(here, partial(self._here, edge), "At the playhead"))
             row.addSpacing(10)
         row.addStretch(1)
-        self.delete = self._button("DELETE CUT", self._delete, "Remove this cut")
+        self.delete = self._button("Delete cut", self._delete, "Remove this cut")
         row.addWidget(self.delete)
         self.addWidget(panel)
         self.setFixedHeight(34)
@@ -84,11 +91,11 @@ class CutEditor(QStackedWidget):
         if index is None:
             self.setCurrentIndex(0)
             return
-        self.title.setText(f"CUT {index + 1} OF {count}")
+        self.title.setText(f"Cut {index + 1} of {count}")
         self.start.setText(fmt_time(cut[0]))
         self.end.setText(fmt_time(cut[1]))
         for field in (self.start, self.end):
-            field.setStyleSheet("")
+            mark(field, False)
         self.setCurrentIndex(1)
 
     # ----- edits -----
@@ -103,17 +110,16 @@ class CutEditor(QStackedWidget):
         try:
             start, end = parse_time(self.start.text()), parse_time(self.end.text())
         except ValueError:
-            bad = "border: 1px solid #e5322d;"
             for field in (self.start, self.end):
                 try:
                     parse_time(field.text())
                 except ValueError:
-                    field.setStyleSheet(bad)
+                    mark(field, True)
             return
         if (start, end) != self._cut and end > start:
             self._emit(start, end)
         elif end <= start:
-            self.end.setStyleSheet("border: 1px solid #e5322d;")
+            mark(self.end, True)
 
     def _nudge(self, edge: int, step: float) -> None:
         a, b = self._cut

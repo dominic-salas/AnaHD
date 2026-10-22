@@ -31,7 +31,7 @@ def test_a_full_frame_picture_with_an_osd_is_not_flagged(tmp_path: Path) -> None
 def test_a_4_3_recording_without_osd_is_flagged(tmp_path: Path) -> None:
     """A digital camera: 4:3 like analog, no OSD in the recording."""
     o = _judge(tmp_path, syn.without_osd(syn.FOUR_THREE, speed=10), syn.FOUR_THREE)
-    assert o.digital and o.reasons == "NO OSD", o
+    assert o.digital and o.reasons == "no OSD", o
 
 
 def test_a_16_9_recording_without_osd_is_flagged(tmp_path: Path) -> None:

@@ -229,11 +229,11 @@ def test_progress_is_shown_per_clip_and_overall(
         window._progress(a.resolve(), 300 + 24 * i, 1000, 100.0 + i)
     status = ca.item.data(STATUS)
     left = (1000 - 300 - 24 * 11) / 24  # 18.2 s
-    assert status.startswith("56%") and "24.0 FPS" in status, status
-    assert f"0:{int(left):02d} LEFT" in status, status
+    assert status.startswith("56%") and "24.0 fps" in status, status
+    assert f"0:{int(left):02d} left" in status, status
     assert ca.item.data(SHARE) == pytest.approx((300 + 24 * 11) / 1000)
     assert cb.item.data(SHARE) is None  # the queued clip shows no progress
-    assert "CLEANING 1 OF 2" in window._header_status.text()
+    assert "Cleaning 1 of 2" in window._header_status.text()
 
 
 def test_worker_reports_failure_instead_of_raising(tmp_path: Path) -> None:
@@ -471,14 +471,14 @@ def test_selecting_a_cut_opens_its_editor_for_exact_times(
     QTest.mouseClick(
         ed.findChildren(QPushButton, options=Qt.FindChildOption.FindChildrenRecursively)[1],
         Qt.MouseButton.LeftButton,
-    )  # the start's +0.5S button
+    )  # the start's +0.5s button
     assert c.cuts == [pytest.approx((2.75, 6.5))]  # +0.5 s on the start
     window._timeline.set_playhead(7.25)
-    ed._here(1)  # END HERE
+    ed._here(1)  # End here
     assert c.cuts[0][1] == pytest.approx(7.25)
     ed.start.setText("nonsense")
     ed.start.editingFinished.emit()
-    assert c.cuts[0][1] == pytest.approx(7.25) and "e5322d" in ed.start.styleSheet()
+    assert c.cuts[0][1] == pytest.approx(7.25) and ed.start.property("invalid") is True
     ed._delete()
     assert c.cuts == [] and ed.currentIndex() == 0
 
@@ -521,7 +521,7 @@ def test_digital_looking_clips_are_left_out_until_included(
     c = _clip(window, tmp_path)
     window._list.setCurrentRow(0)
     window._reader.checked.emit(c.path, Origin(True, 0.0))
-    assert c.skip and "LOOKS DIGITAL" in c.item.data(STATUS)
+    assert c.skip and "Looks digital" in c.item.data(STATUS)
     assert not window._start.isEnabled() and window._include.isVisibleTo(window)
     window._start_all()
     assert started == []
@@ -548,9 +548,9 @@ def test_classic_cleaning_is_a_choice_made_before_clean(
 
     started: list[tuple[object, ...]] = []
     monkeypatch.setattr(window._runner, "start", lambda *a: started.append(a))
-    assert window._engine_label.text() == "CLEANING: LEARNED (V6)"  # the default
+    assert window._engine_label.text() == "Cleaning: Learned (v6)"  # the default
     window._set_engine("classic")
-    assert window._engine_label.text() == "CLEANING: CLASSIC"
+    assert window._engine_label.text() == "Cleaning: Classic"
     c = _clip(window, tmp_path)
     window._start_all()
     assert started[0][4] is False
@@ -572,7 +572,7 @@ def test_panel_is_generated_from_the_settings_metadata(window: MainWindow) -> No
     assert panel.sections["Clean"].isVisibleTo(panel)
     assert panel.params() == RemasterParams()  # fresh settings: the approved defaults
     texts = [w.text() for w in panel.findChildren(QLabel)]
-    assert any(t.startswith("EXPERIMENTAL") for t in texts)
+    assert any(t.startswith("Experimental") for t in texts)
 
 
 def test_toggles_switch_off_and_bring_back_the_last_value(window: MainWindow) -> None:
@@ -654,7 +654,7 @@ def test_panel_is_locked_while_cleaning(
 def test_spinner_shows_while_a_preview_renders(window: MainWindow) -> None:
     window.show()
     window._previewer.busy.emit(True)
-    assert not window._spinner.isHidden() and "RENDERING" in window._preview_state.text()
+    assert not window._spinner.isHidden() and "Rendering" in window._preview_state.text()
     window._previewer.busy.emit(False)
     assert window._spinner.isHidden()
 
@@ -662,12 +662,12 @@ def test_spinner_shows_while_a_preview_renders(window: MainWindow) -> None:
 def test_speed_and_warning_follow_the_settings(window: MainWindow) -> None:
     panel = window._panel
     panel.set_params(RemasterParams(), announce=True)
-    assert "ABOUT 21 FPS" in panel.speed.text() and "BELOW" not in panel.speed.text()
+    assert "about 21 fps" in panel.speed.text() and "Below" not in panel.speed.text()
     panel.set_params(
         RemasterParams(motion_blur=39, stabilisation=50, superview="stretch", sharpen=50),
         announce=True,
     )
-    assert "BELOW 18 FPS" in panel.speed.text() and "e5322d" in panel.speed.styleSheet()
+    assert "Below 18 fps" in panel.speed.text() and panel.speed.property("role") == "warning"
 
 
 def test_each_effect_shows_its_speed_cost(window: MainWindow) -> None:
@@ -678,10 +678,10 @@ def test_each_effect_shows_its_speed_cost(window: MainWindow) -> None:
     expected = costs(RemasterParams(), window._learned())
     for name, pct in expected.items():
         label = panel._costs[name]
-        assert not label.isHidden() and f"-{pct:.0f} % SPEED" in label.text(), name
+        assert not label.isHidden() and f"-{pct:.0f} % speed" in label.text(), name
     assert panel._costs["warmth"].isHidden()  # no measured cost: nothing shown
     window._set_engine("classic")
-    assert panel._costs["sharpen"].text() == "<1 % SPEED"  # within noise for Classic
+    assert panel._costs["sharpen"].text() == "<1 % speed"  # within noise for Classic
 
 
 def test_moving_numbers_wait_for_the_osd_redraw(window: MainWindow) -> None:
@@ -708,7 +708,7 @@ class _TextLog(QPainter):
 
 
 @pytest.mark.parametrize(
-    "status", ["", "QUEUED", "DONE   0:59   16.5 FPS", "42%   21.5 FPS   0:32 LEFT"]
+    "status", ["", "Queued", "Done   0:59   16.5 fps", "42%   21.5 fps   0:32 left"]
 )
 @pytest.mark.parametrize("width", [405, 700])  # the list at its narrowest, and wide
 def test_clip_card_keeps_the_name_whole_whatever_the_status(
@@ -718,7 +718,7 @@ def test_clip_card_keeps_the_name_whole_whatever_the_status(
     model = QStandardItemModel(1, 1)
     index = model.index(0, 0)
     model.setData(index, "D:/flights/sunny.mp4", PATH)
-    model.setData(index, "0:20   1280x720   60 FPS", DETAILS)
+    model.setData(index, "0:20   1280x720   60 fps", DETAILS)
     model.setData(index, status, STATUS)
     image = QImage(width, CARD_HEIGHT, QImage.Format.Format_ARGB32)
     option = QStyleOptionViewItem()
@@ -728,5 +728,24 @@ def test_clip_card_keeps_the_name_whole_whatever_the_status(
     painter.end()
     assert "sunny.mp4" in painter.texts  # never shortened by the status
     if width == 700:  # room for everything: nothing is shortened
-        assert "0:20   1280x720   60 FPS" in painter.texts
+        assert "0:20   1280x720   60 fps" in painter.texts
         assert status in painter.texts
+
+
+def test_settings_panel_is_never_cut_off_on_the_right(window: MainWindow) -> None:
+    """With every section open, the widest row still fits (there is no sideways scroll)."""
+    window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+    window.resize(1720, 980)
+    window.show()
+    window._pages.setCurrentWidget(window._list_page)  # the clips page, as with a clip in
+    panel = window._panel
+    for header in panel.findChildren(QPushButton):
+        if header.text().startswith("▸"):
+            header.click()
+    for theme_name in ("dark", "light"):
+        window._apply_theme(theme_name)
+        QCoreApplication.processEvents()
+        QTest.qWait(50)
+        body = panel.widget()
+        assert body.width() <= panel.viewport().width(), theme_name
+        assert body.minimumSizeHint().width() <= panel.viewport().width(), theme_name

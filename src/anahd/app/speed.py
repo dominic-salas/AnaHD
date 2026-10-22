@@ -100,6 +100,6 @@ def estimate(params: RemasterParams, learned: bool) -> tuple[float, str | None]:
         return fps, None
     minutes = seconds / 60
     return fps, (
-        f"BELOW {RULE_FPS:.0f} FPS: A 3-MINUTE FLIGHT TAKES ABOUT {minutes:.1f} MINUTES "
-        "WITH THESE EFFECTS (MORE THAN 10)"
+        f"Below {RULE_FPS:.0f} fps: a 3-minute flight takes about {minutes:.1f} minutes "
+        "with these effects (more than 10)"
     )

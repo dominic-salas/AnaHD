@@ -9,6 +9,7 @@ the result is encoded.
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -397,6 +398,111 @@ def count_frames(path: Path) -> int:
         check=False,
         creationflags=NO_WINDOW,
     )
-    if out.returncode != 0 or not out.stdout.strip().isdigit():
+    # A transport stream (.ts) lists its video stream twice, under its program too.
+    counts = out.stdout.split()
+    if out.returncode != 0 or not counts or not counts[0].isdigit():
         raise MediaError(f"could not count frames of {path}: {out.stderr.strip()}")
-    return int(out.stdout.strip())
+    return int(counts[0])
+
+
+# The recording's sound goes into the output re-encoded as AAC: a cut or a part must start
+# on the exact sample its first frame shows, and copied AAC can only start on a 1024-sample
+# packet. Above the 128-160 kb/s goggle DVRs record, so no audible loss.
+AUDIO_ARGS = ("-c:a", "aac", "-b:a", "192k")
+
+
+@dataclass(frozen=True)
+class AudioSpan:
+    """A stretch of the recording's sound for the output: from ``start`` (seconds on the
+    recording's own clock, as its timestamps say) for ``seconds``, the length of the video
+    made from those frames."""
+
+    start: float
+    seconds: float
+
+
+@dataclass(frozen=True)
+class Clock:
+    """Where a recording's first video frame and the file itself start, on its own clock
+    (a transport stream's clock rarely starts at 0)."""
+
+    video: float
+    file: float
+
+
+def sound_clock(path: Path) -> Clock | None:
+    """The recording's clock; None when it has no sound."""
+    out = subprocess.run(
+        [
+            require("ffprobe"),
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,start_time:format=start_time",
+            "-of",
+            "json",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        creationflags=NO_WINDOW,
+    )
+    if out.returncode != 0:
+        raise MediaError(f"ffprobe could not read {path}: {out.stderr.strip()}")
+    data = json.loads(out.stdout)
+    streams = data.get("streams") or []
+    if not any(s.get("codec_type") == "audio" for s in streams):
+        return None
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+
+    def seconds(value: object) -> float:
+        try:
+            return float(str(value))
+        except ValueError:  # "N/A"
+            return 0.0
+
+    file = seconds(data.get("format", {}).get("start_time"))
+    return Clock(seconds(video.get("start_time", file)), file)
+
+
+def first_frame_time(clock: Clock, fps: float, seek: float | None) -> float:
+    """When (on the recording's clock) the first frame read with ``-ss seek`` was shown.
+    FFmpeg seeks from the file's start, then decodes from the first frame at or after that
+    moment; frames follow every 1/fps from the first (DVRs record a constant 60 fps:
+    checked on HDZero recordings, 2026-10-22)."""
+    if seek is None:
+        return clock.video
+    target = clock.file + seek
+    if target <= clock.video:
+        return clock.video
+    return clock.video + math.ceil((target - clock.video) * fps - 1e-6) / fps
+
+
+def add_audio(video: Path, src: Path, spans: list[AudioSpan], out: Path) -> None:
+    """``video`` with ``src``'s sound for ``spans``, one after another, written to ``out``.
+
+    The picture is copied as it is. Each span's sound is cut on the sample, starts with
+    silence where the recording's sound starts after its first frame (DVRs start it 50 to
+    100 ms late), and is padded or trimmed to exactly the length of its video, so the
+    sound lines up with every frame however many parts are joined."""
+    chains, labels = [], []
+    for i, span in enumerate(spans):
+        chains.append(
+            f"[s{i}]atrim=start={span.start:.6f}:duration={span.seconds:.6f},"
+            f"asetpts=PTS-{span.start:.6f}/TB,aresample=async=1:first_pts=0,"
+            f"apad=whole_dur={span.seconds:.6f},atrim=duration={span.seconds:.6f}[a{i}]"
+        )
+        labels.append(f"[a{i}]")
+    split = "".join(f"[s{i}]" for i in range(len(spans)))
+    graph = [f"[1:a:0]asplit={len(spans)}{split}" if len(spans) > 1 else "[1:a:0]anull[s0]"]
+    graph += chains
+    graph.append(f"{''.join(labels)}concat=n={len(spans)}:v=0:a=1[aout]")
+    # -copyts: the recording's sound keeps its own timestamps, the clock spans are on.
+    cmd = [require("ffmpeg"), "-nostdin", "-v", "error", "-i", str(video)]
+    cmd += ["-copyts", "-i", str(src)]
+    cmd += ["-filter_complex", ";".join(graph), "-map", "0:v:0", "-map", "[aout]"]
+    cmd += ["-c:v", "copy", *AUDIO_ARGS, "-movflags", "+faststart", "-y", str(out)]
+    run = subprocess.run(cmd, capture_output=True, text=True, creationflags=NO_WINDOW)
+    if run.returncode != 0:
+        raise MediaError(f"could not add the recording's sound: {run.stderr.strip()}")

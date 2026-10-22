@@ -138,6 +138,8 @@ def copy_licences(target: Path, ffmpeg_licence: str | None) -> None:
         "- PyTorch and torchvision (BSD-3-Clause) with NVIDIA's CUDA runtime libraries "
         "(NVIDIA's licence terms, redistributed as PyTorch ships them)\n"
         "- RAFT-small optical-flow weights from torchvision (BSD-3-Clause)\n"
+        "- The Space Grotesk and Geist Mono fonts (SIL Open Font License 1.1; texts in "
+        "_internal/anahd/app/fonts)\n"
         "- NumPy (BSD-3-Clause), OpenCV (Apache-2.0)\n"
         "- The AnaHD restorer weights (MIT), trained with SeedVR2 (Apache-2.0) as teacher\n"
         f"- {ffmpeg}\n"
@@ -147,7 +149,14 @@ def copy_licences(target: Path, ffmpeg_licence: str | None) -> None:
 
 
 def pyinstaller(
-    build: Path, out: Path, name: str, module: str, icon: Path, *, windowed: bool
+    build: Path,
+    out: Path,
+    name: str,
+    module: str,
+    icon: Path,
+    *,
+    windowed: bool,
+    data: tuple[tuple[Path, str], ...] = (),
 ) -> Path:
     """One PyInstaller folder build of ``module``'s main(); returns the folder."""
     launcher = build / f"{name}_main.py"
@@ -155,13 +164,14 @@ def pyinstaller(
         f"import sys\n\nfrom {module} import main\n\nsys.exit(main())\n", encoding="utf-8"
     )
     excludes = [arg for mod in EXCLUDE for arg in ("--exclude-module", mod)]
+    datas = [arg for src, dest in data for arg in ("--add-data", f"{src}{os.pathsep}{dest}")]
     subprocess.run(
         [
             *(sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean"),
             "--windowed" if windowed else "--console",
             *("--name", name, "--icon", str(icon)),
             *("--distpath", str(out), "--workpath", str(build / "work" / name)),
-            *("--specpath", str(build), *excludes),
+            *("--specpath", str(build), *excludes, *datas),
             str(launcher),
         ],
         check=True,
@@ -185,7 +195,8 @@ def main() -> int:
     build.mkdir(parents=True)
     icon = build / "anahd.ico"
     write_icon(icon)
-    app = pyinstaller(build, args.out, APP_NAME, "anahd.app", icon, windowed=True)
+    fonts = (ROOT / "src" / "anahd" / "app" / "fonts", "anahd/app/fonts")
+    app = pyinstaller(build, args.out, APP_NAME, "anahd.app", icon, windowed=True, data=(fonts,))
     # The command-line tool, in the same folder: its own small exe, the app's libraries.
     cli = pyinstaller(build, build / "cli", CLI_NAME, "anahd.cli", icon, windowed=False)
     shutil.copy2(cli / f"{CLI_NAME}.exe", app / f"{CLI_NAME}.exe")

@@ -48,6 +48,11 @@ OTHERS = (
     ),
     ("Inno Setup", "Inno Setup licence (permissive)", "Makes the installer"),
     (
+        "Space Grotesk and Geist Mono fonts",
+        "SIL Open Font License 1.1",
+        "The app's typefaces (as on dvsalas.com); licence texts in anahd/app/fonts",
+    ),
+    (
         "SeedVR2 7B (ByteDance Seed)",
         "Apache-2.0",
         "Teacher the AnaHD model was distilled from; not distributed",

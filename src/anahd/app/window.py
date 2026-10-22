@@ -21,8 +21,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSettings, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QImage, QPainter, QPaintEvent, QPixmap
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -153,26 +153,8 @@ def restyle(widget: QWidget, name: str, value: object) -> None:
         widget.style().polish(widget)
 
 
-class DotGrid(QWidget):
-    """A plain area with the site's faint dot grid behind its children."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._dot = QColor(theme.DARK.dot)
-
-    def set_palette(self, palette: theme.Palette) -> None:
-        self._dot = QColor(palette.dot)
-        self.update()
-
-    def paintEvent(self, event: QPaintEvent) -> None:
-        painter = QPainter(self)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._dot)
-        step = 16
-        for y in range(step // 2, self.height(), step):
-            for x in range(step // 2, self.width(), step):
-                painter.drawEllipse(QPointF(x, y), 1.0, 1.0)
-        painter.end()
+class Page(QWidget):
+    """A plain page on the window's background."""
 
 
 def videos_in(paths: Sequence[Path]) -> list[Path]:
@@ -191,14 +173,14 @@ def clock(seconds: float) -> str:
     return f"{int(seconds // 60)}:{int(seconds % 60):02d}"
 
 
-def split_page(left: QWidget, right: QWidget, stretch: tuple[int, int]) -> DotGrid:
+def split_page(left: QWidget, right: QWidget, stretch: tuple[int, int]) -> Page:
     split = QSplitter(Qt.Orientation.Horizontal)
     split.addWidget(left)
     split.addWidget(right)
     split.setStretchFactor(0, stretch[0])
     split.setStretchFactor(1, stretch[1])
     split.setSizes([stretch[0] * 1000, stretch[1] * 1000])  # start in this proportion
-    page = DotGrid()
+    page = Page()
     layout = QVBoxLayout(page)
     layout.setContentsMargins(40, 32, 40, 16)
     layout.addWidget(split)
@@ -280,10 +262,10 @@ class MainWindow(QMainWindow):
     # ----- layout -----
 
     def _build(self) -> None:
-        logo = QLabel("ana<span style='color:#e5322d'>.</span>hd")
+        logo = self._logo = QLabel()
         logo.setProperty("role", "logo")
-        self._step_clips = QPushButton("1  CLIPS")
-        self._step_results = QPushButton("2  RESULTS")
+        self._step_clips = QPushButton("1  Clips")
+        self._step_results = QPushButton("2  Results")
         self._step_clips.clicked.connect(lambda: self._go(CLIPS_PAGE))
         self._step_results.clicked.connect(lambda: self._go(RESULTS_PAGE))
         for step in (self._step_clips, self._step_results):
@@ -293,7 +275,7 @@ class MainWindow(QMainWindow):
         self._theme_button = QPushButton()
         self._theme_button.setProperty("flat", True)
         self._theme_button.clicked.connect(self._toggle_theme)
-        quit_button = button("QUIT", self._quit)
+        quit_button = button("Quit", self._quit)
         quit_button.setProperty("flat", True)
         quit_button.setToolTip("Close AnaHD completely")
         header = QFrame()
@@ -314,7 +296,7 @@ class MainWindow(QMainWindow):
         top.addWidget(quit_button)
 
         # Empty: one big drop target that says what to do.
-        self._drop_zone = DotGrid()
+        self._drop_zone = Page()
         self._title = DotTitle("anahd", cell=12, accent="hd")
         intro = QLabel(
             "Drop analog FPV DVR recordings (or a whole folder) anywhere on this window. "
@@ -327,7 +309,7 @@ class MainWindow(QMainWindow):
         zone = QVBoxLayout(self._drop_zone)
         zone.setContentsMargins(72, 48, 72, 48)
         zone.addStretch(2)
-        zone.addWidget(eyebrow("● RUNS ON THIS PC. NOTHING IS UPLOADED"))
+        zone.addWidget(eyebrow("● Runs on this PC. Nothing is uploaded"))
         zone.addSpacing(18)
         zone.addWidget(self._title)
         zone.addSpacing(24)
@@ -335,8 +317,8 @@ class MainWindow(QMainWindow):
         zone.addSpacing(24)
         zone.addLayout(
             row(
-                button("ADD CLIPS", self._choose_clips, primary=True),
-                button("ADD A FOLDER", self._choose_folder),
+                button("Add clips", self._choose_clips, primary=True),
+                button("Add a folder", self._choose_folder),
                 1,
             )
         )
@@ -346,14 +328,14 @@ class MainWindow(QMainWindow):
         self._list = ClipList()
         self._list.dropped.connect(self.add_paths)
         self._list.itemSelectionChanged.connect(self._selection_changed)
-        self._remove = button("REMOVE", self._remove_selected)
+        self._remove = button("Remove", self._remove_selected)
         left = column(
-            eyebrow("STEP 1   CLIPS"),
+            eyebrow("Step 1 · Clips"),
             heading("Your recordings"),
             self._list,
             row(
-                button("ADD MORE", self._choose_clips),
-                button("ADD A FOLDER", self._choose_folder),
+                button("Add more", self._choose_clips),
+                button("Add a folder", self._choose_folder),
                 self._remove,
                 1,
             ),
@@ -363,15 +345,15 @@ class MainWindow(QMainWindow):
         self._timeline = Timeline()
         self._timeline.seeked.connect(self._seek)
         self._timeline.cuts_changed.connect(self._cuts_changed)
-        self._play = button("PLAY", self._toggle_play)
+        self._play = button("Play", self._toggle_play)
         self._time = eyebrow()
-        self._cut = button("✂  CUT", self._add_cut)
+        self._cut = button("✂  Cut", self._add_cut)
         self._cut.setToolTip(
             "Leave a stretch out: drops a cut at the playhead; drag its edges to size it. "
             "A cut at the start or end trims the clip."
         )
         self._keeps = eyebrow()
-        self._include = button("INCLUDE ANYWAY", self._include_clip)
+        self._include = button("Include anyway", self._include_clip)
         self._include.setToolTip("Clean this clip although it looks digital")
         self._editor = CutEditor(lambda: self._timeline.playhead)
         self._editor.changed.connect(self._timeline.set_cut)
@@ -387,10 +369,10 @@ class MainWindow(QMainWindow):
         self._preview_state = eyebrow()
         self._previewer.busy.connect(self._spinner.spin)
         self._previewer.busy.connect(
-            lambda on: self._preview_state.setText("RENDERING PREVIEW..." if on else "")
+            lambda on: self._preview_state.setText("Rendering preview..." if on else "")
         )
         heading_row = row(
-            eyebrow("PREVIEW   PAUSED: BEFORE / AFTER WITH YOUR SETTINGS; DRAG THE LINE"),
+            eyebrow("Preview · Paused: before / after with your settings; drag the line"),
             1,
             self._preview_state,
             self._spinner,
@@ -407,8 +389,7 @@ class MainWindow(QMainWindow):
         self._panel = RemasterPanel()
         self._panel.set_params(self._saved_params())
         self._panel.changed.connect(self._params_changed)
-        settings_col = column(eyebrow("REMASTER SETTINGS"), self._panel, stretch=self._panel)
-        settings_col.setMinimumWidth(300)
+        settings_col = column(eyebrow("Remaster settings"), self._panel, stretch=self._panel)
         middle = split_page(right, settings_col, (8, 3))
         middle_layout = middle.layout()
         if middle_layout is not None:
@@ -423,17 +404,17 @@ class MainWindow(QMainWindow):
         self._results.itemSelectionChanged.connect(self._result_changed)
         self._preview = Preview()
         self._preview.moment.connect(lambda _share: self._request_preview())
-        self._open = button("OPEN OUTPUT", self._open_output)
-        self._show = button("SHOW IN FOLDER", self._show_output)
+        self._open = button("Open output", self._open_output)
+        self._show = button("Show in folder", self._show_output)
         self._preview_caption = eyebrow()
         rleft = column(
-            eyebrow("STEP 2   RESULTS"),
+            eyebrow("Step 2 · Results"),
             heading("Cleaned clips"),
             self._results,
             stretch=self._results,
         )
         rright = column(
-            eyebrow("BEFORE / AFTER   DRAG THE LINE TO COMPARE"),
+            eyebrow("Before / after · Drag the line to compare"),
             self._preview,
             row(self._preview_caption, 1, self._show, self._open),
             stretch=self._preview,
@@ -447,20 +428,20 @@ class MainWindow(QMainWindow):
 
         # Footer: where outputs go, overall progress, CLEAN / STOP.
         self._out_label = eyebrow()
-        self._out_button = button("CHANGE", self._choose_out_dir)
+        self._out_button = button("Change", self._choose_out_dir)
         self._out_button.setProperty("flat", True)
         self._export_label = eyebrow()
-        self._export_button = button("CHANGE", self._choose_export)
+        self._export_button = button("Change", self._choose_export)
         self._engine_label = eyebrow()
-        self._engine_button = button("CHANGE", self._choose_engine)
+        self._engine_button = button("Change", self._choose_engine)
         self._engine_button.setProperty("flat", True)
         self._export_button.setProperty("flat", True)
         self._overall = QProgressBar()
         self._overall.setRange(0, 1000)
         self._overall.setTextVisible(False)
         self._overall.setFixedWidth(220)
-        self._start = button("CLEAN ALL  →", self._start_all, primary=True)
-        self._stop = button("STOP", self._stop_all)
+        self._start = button("Clean all  →", self._start_all, primary=True)
+        self._stop = button("Stop", self._stop_all)
         footer = QFrame()
         footer.setProperty("role", "footer")
         footer.setFixedHeight(68)
@@ -518,11 +499,10 @@ class MainWindow(QMainWindow):
         self._frame_wipe.palette_ = palette
         self._frame_wipe.fonts = self._fonts
         self._timeline.palette_ = palette
+        self._logo.setText(f"ana<span style='color:{palette.accent}'>.</span>hd")
         self._title.set_colours(palette.text, palette.accent)
         self._dot.set_colours(palette.faint, palette.accent)
-        for grid in (self._drop_zone, self._list_page, self._results_page):
-            grid.set_palette(palette)
-        self._theme_button.setText("LIGHT" if palette.name == "dark" else "DARK")
+        self._theme_button.setText("Light" if palette.name == "dark" else "Dark")
         self._settings.setValue("theme", palette.name)
         self.update()
 
@@ -598,7 +578,7 @@ class MainWindow(QMainWindow):
         if all(t.is_file() for t in targets):
             clip.state, clip.output, clip.outputs = DONE, targets[0], targets
             clip.cleaned_cuts = list(clip.cuts) if len(targets) > 1 else []
-            self._set_status(clip, "DONE  (OUTPUT EXISTS)")
+            self._set_status(clip, "Done  (output exists)")
         elif clip.state == DONE:
             clip.state, clip.output, clip.outputs = WAITING, None, []
             self._set_status(clip, "")
@@ -630,7 +610,7 @@ class MainWindow(QMainWindow):
         clip = self._clips.get(path)
         if clip is not None and clip.state == WAITING:
             clip.state = FAILED
-            self._set_status(clip, "CAN'T READ", problem=True)
+            self._set_status(clip, "Can't read", problem=True)
             clip.item.setToolTip(why)
             self._refresh()
 
@@ -735,9 +715,9 @@ class MainWindow(QMainWindow):
         params, learned = self._panel.params(), self._learned()
         self._panel.set_costs(costs(params, learned))
         fps, warning = estimate(params, learned)
-        text = f"ESTIMATED SPEED: ABOUT {fps:.0f} FPS (RTX 4070 TI, 720P RECORDING)"
+        text = f"Estimated speed: about {fps:.0f} fps (RTX 4070 Ti, 720p recording)"
         self._panel.speed.setText(text + (f"\n{warning}" if warning else ""))
-        self._panel.speed.setStyleSheet("color: #e5322d;" if warning else "")
+        restyle(self._panel.speed, "role", "warning" if warning else "caption")
 
     def _preview_request(self) -> Request | None:
         clip = self._selected()
@@ -763,7 +743,7 @@ class MainWindow(QMainWindow):
     def _preview_failed(self, req: Request, why: str) -> None:
         clip = self._selected()
         if clip is not None and clip.path == req.path:
-            self._preview_state.setText("PREVIEW FAILED (HOVER)")
+            self._preview_state.setText("Preview failed (hover)")
             self._preview_state.setToolTip(why)
 
     def _still(self, still: Still) -> None:
@@ -792,7 +772,7 @@ class MainWindow(QMainWindow):
         if seconds >= clip.duration - 0.05:
             seconds = 0.0  # from the end: start over
         self._playing = True
-        self._play.setText("PAUSE")
+        self._play.setText("Pause")
         self._stage.setCurrentWidget(self._screen)
         self._player.play(clip.path, seconds, clip.duration, clip.size, clip.cuts)
 
@@ -801,7 +781,7 @@ class MainWindow(QMainWindow):
         if self._playing:
             self._player.halt()
         self._playing = False
-        self._play.setText("PLAY")
+        self._play.setText("Play")
         if was:
             self._request_frame()  # paused: the preview of where it stopped
 
@@ -814,7 +794,7 @@ class MainWindow(QMainWindow):
 
     def _play_ended(self) -> None:
         self._playing = False
-        self._play.setText("PLAY")
+        self._play.setText("Play")
         self._request_frame()
 
     def _add_cut(self) -> None:
@@ -836,7 +816,7 @@ class MainWindow(QMainWindow):
         clip = self._selected()
         if clip is not None and clip.skip:
             clip.skip = False
-            self._set_status(clip, "INCLUDED (LOOKS DIGITAL)")
+            self._set_status(clip, "Included (looks digital)")
             self._refresh()
 
     def _checked(self, path: Path, origin: Origin) -> None:
@@ -846,11 +826,11 @@ class MainWindow(QMainWindow):
         clip.origin = origin
         if origin.digital and clip.state == WAITING:
             clip.skip = True
-            self._set_status(clip, f"LOOKS DIGITAL ({origin.reasons}): LEFT OUT", problem=True)
+            self._set_status(clip, f"Looks digital ({origin.reasons}): left out", problem=True)
             clip.item.setToolTip(
                 "No OSD was found in this recording: analog goggle recordings have the OSD "
                 "burned in, digital ones don't. AnaHD is made for analog video, so it is "
-                "left out of CLEAN. Select it and press INCLUDE ANYWAY to clean it too."
+                "left out of Clean. Select it and press Include anyway to clean it too."
             )
         self._refresh()
 
@@ -874,12 +854,12 @@ class MainWindow(QMainWindow):
         if clip is None or not ready:
             self._keeps.setText("")
         elif not clip.editable:
-            self._keeps.setText("CUTS LOCKED: CLEANING OR CLEANED")
+            self._keeps.setText("Cuts locked: cleaning or cleaned")
         elif clip.cuts:
             keeps = kept_seconds(clip.cuts, clip.duration)
-            self._keeps.setText(f"KEEPS {clock(keeps)} OF {clock(clip.duration)}")
+            self._keeps.setText(f"Keeps {clock(keeps)} of {clock(clip.duration)}")
         else:
-            self._keeps.setText("NO CUTS")
+            self._keeps.setText("No cuts")
 
     # ----- cleaning -----
 
@@ -889,7 +869,7 @@ class MainWindow(QMainWindow):
         for clip in self._batch:
             clip.state = QUEUED
             clip.item.setToolTip("")
-            self._set_status(clip, "QUEUED")
+            self._set_status(clip, "Queued")
         self._began = time.monotonic()
         selected = self._selected()
         if selected is not None:
@@ -909,14 +889,14 @@ class MainWindow(QMainWindow):
         targets = self._targets(clip)
         if all(t.exists() for t in targets):
             clip.state, clip.output, clip.outputs = DONE, targets[0], targets
-            self._set_status(clip, "DONE  (OUTPUT EXISTS)")
+            self._set_status(clip, "Done  (output exists)")
             self._next()
             return
         self._current = clip
         clip.state, clip.output, clip.outputs = CLEANING, targets[0], targets
         clip.cleaned_cuts = list(clip.cuts)
         self._etas.pop(clip.path, None)
-        self._set_status(clip, "STARTING...", 0.0)
+        self._set_status(clip, "Starting...", 0.0)
         clip.params = self._panel.params()
         self._runner.start(
             clip.path,
@@ -935,9 +915,9 @@ class MainWindow(QMainWindow):
         eta = self._etas.setdefault(path, Eta())
         fps, left = eta.update(done, total, when)
         share = min(done / total, 1.0) if total else 0.0
-        speed = f"{fps:.1f} FPS" if fps else ""
-        when_done = f"{clock(left)} LEFT" if left is not None else "ESTIMATING..."
-        text = f"{share:.0%}   {speed}   {when_done}" if total else f"{done} FRAMES   {speed}"
+        speed = f"{fps:.1f} fps" if fps else ""
+        when_done = f"{clock(left)} left" if left is not None else "Estimating..."
+        text = f"{share:.0%}   {speed}   {when_done}" if total else f"{done} frames   {speed}"
         self._set_status(clip, text, share)
         self._refresh()
 
@@ -948,7 +928,7 @@ class MainWindow(QMainWindow):
         clip = self._clips.get(path)
         if clip is not None:
             clip.state = DONE
-            self._set_status(clip, f"DONE   {clock(took)}   {frames / max(took, 1e-6):.1f} FPS")
+            self._set_status(clip, f"Done   {clock(took)}   {frames / max(took, 1e-6):.1f} fps")
             clip.item.setToolTip(notes)
             self._reader.set_crop(path, Crop(*crop))
         self._next()
@@ -957,7 +937,7 @@ class MainWindow(QMainWindow):
         clip = self._clips.get(path)
         if clip is not None:
             clip.state = FAILED
-            self._set_status(clip, "FAILED  (HOVER FOR WHY)", problem=True)
+            self._set_status(clip, "Failed  (hover for why)", problem=True)
             clip.item.setToolTip(message)
             if self._selected() is clip:
                 self._load_clip(clip)  # its cuts can be changed again
@@ -968,7 +948,7 @@ class MainWindow(QMainWindow):
         for clip in self._clips.values():
             if clip.state in (QUEUED, CLEANING):
                 clip.state = WAITING
-                self._set_status(clip, "STOPPED" if clip is self._current else "")
+                self._set_status(clip, "Stopped" if clip is self._current else "")
         self._current = None
         self._batch = []
         selected = self._selected()
@@ -1043,7 +1023,7 @@ class MainWindow(QMainWindow):
             item.setData(PATH, str(out))
             item.setData(DETAILS, c.item.data(DETAILS))
             item.setData(THUMB, c.item.data(THUMB))
-            item.setData(STATUS, f"PART {part + 1}" if part is not None else "")
+            item.setData(STATUS, f"Part {part + 1}" if part is not None else "")
             self._results.addItem(item)
         keys = [str(out) for _, out, _ in files]
         row_ = keys.index(str(selected[1])) if selected and str(selected[1]) in keys else 0
@@ -1082,7 +1062,7 @@ class MainWindow(QMainWindow):
             return
         before = pixmap_from_png(pair.before) if pair.before else None
         after = pixmap_from_png(pair.after) if pair.after else None
-        self._preview.wipe.show_pair(before, after, "" if after else "NO OUTPUT")
+        self._preview.wipe.show_pair(before, after, "" if after else "No output")
 
     def _refresh_result_buttons(self) -> None:
         picked = self._result()
@@ -1121,23 +1101,23 @@ class MainWindow(QMainWindow):
         self._step_results.setEnabled(bool(self._done_clips()))
         todo = [c for c in self._clips.values() if c.state in (WAITING, FAILED) and not c.skip]
         self._start.setEnabled(bool(todo) and not busy)
-        self._start.setText(f"CLEAN {len(todo)} CLIP{'S' if len(todo) != 1 else ''}  →")
+        self._start.setText(f"Clean {len(todo)} clip{'s' if len(todo) != 1 else ''}  →")
         self._stop.setVisible(busy)
         self._out_button.setEnabled(not busy)
         self._export_button.setEnabled(not busy)
         self._engine_button.setEnabled(not busy)
         self._panel.setEnabled(not busy)  # what a clip gets is fixed when CLEAN starts
         self._engine_label.setText(
-            "CLEANING: LEARNED (V6)" if self._learned() else "CLEANING: CLASSIC"
+            "Cleaning: Learned (v6)" if self._learned() else "Cleaning: Classic"
         )
         self._export_label.setText(
-            "EXPORT: EACH KEPT PART AS ITS OWN FILE"
+            "Export: each kept part as its own file"
             if self._parts()
-            else "EXPORT: ONE FILE PER CLIP"
+            else "Export: one file per clip"
         )
         out_dir = self._out_dir()
         self._out_label.setText(
-            f"OUTPUT: {out_dir}" if out_dir else "OUTPUT: NEXT TO EACH RECORDING (ANAHD_<NAME>.MP4)"
+            f"Output: {out_dir}" if out_dir else "Output: next to each recording (AnaHD_<name>.mp4)"
         )
         self._refresh_result_buttons()
         self._update_cut_controls()
@@ -1157,7 +1137,7 @@ class MainWindow(QMainWindow):
             ]
             share = sum(parts) / len(parts)
             index = next((i for i, c in enumerate(self._batch) if c.state == CLEANING), 0)
-            text = f"CLEANING {index + 1} OF {len(self._batch)}   {share:.0%}"
+            text = f"Cleaning {index + 1} of {len(self._batch)}   {share:.0%}"
             self._overall.setValue(round(share * 1000))
             self._overall.setVisible(True)
             self._header_status.setText(text)
@@ -1166,7 +1146,7 @@ class MainWindow(QMainWindow):
             self._overall.setVisible(False)
             done = sum(c.state == DONE for c in self._clips.values())
             self._header_status.setText(
-                f"{done} OF {len(self._clips)} CLEANED" if self._clips else ""
+                f"{done} of {len(self._clips)} cleaned" if self._clips else ""
             )
             self._tray.setToolTip("AnaHD")
         self._list.viewport().update()
