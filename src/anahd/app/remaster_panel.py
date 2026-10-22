@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from anahd.remaster import GROUP_INFO, GROUPS, RemasterParams, schema
 
+MIN_WIDTH = 300  # the settings column's usual width; a wider row widens it
 DEBOUNCE_MS = 120  # sliders send one change per pause, not one per pixel of drag
 
 
@@ -119,7 +120,7 @@ class RemasterPanel(QScrollArea):
         if body is None:
             return hint
         width = body.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width()
-        return QSize(max(hint.width(), width), hint.height())
+        return QSize(max(hint.width(), width, MIN_WIDTH), hint.height())
 
     # ----- building -----
 
