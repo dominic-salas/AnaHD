@@ -747,6 +747,7 @@ def test_settings_panel_is_never_cut_off_on_the_right(window: MainWindow) -> Non
         QCoreApplication.processEvents()
         QTest.qWait(50)
         body = panel.widget()
+        assert body is not None
         assert body.width() <= panel.viewport().width(), theme_name
         assert body.minimumSizeHint().width() <= panel.viewport().width(), theme_name
         # ...and no row is so wide that the panel squeezes the clip list next to it

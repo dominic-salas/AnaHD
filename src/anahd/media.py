@@ -454,7 +454,7 @@ def sound_clock(path: Path) -> Clock | None:
     streams = data.get("streams") or []
     if not any(s.get("codec_type") == "audio" for s in streams):
         return None
-    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    video: dict[str, object] = next((s for s in streams if s.get("codec_type") == "video"), {})
 
     def seconds(value: object) -> float:
         try:
