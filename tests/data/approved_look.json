@@ -1,0 +1,45 @@
+{
+ "source": "analog_look/review/*_v6_vs_c03look.mp4 (right half), the renders approved as the reference look on 2026-10-21",
+ "times": [
+  2.0,
+  6.0,
+  10.0,
+  14.0,
+  18.0
+ ],
+ "measure": "frame blurred (sigma 3), reduced to 360x270, BT.709 Y'CbCr; luma quantiles, mean |CbCr|, mean Cb and Cr",
+ "clips": {
+  "day_sunny": {
+   "p5": 0.1491,
+   "p50": 0.4381,
+   "p95": 0.7079,
+   "sat": 0.078,
+   "cb": 0.0003,
+   "cr": -0.0467
+  },
+  "urban": {
+   "p5": 0.1314,
+   "p50": 0.3887,
+   "p95": 0.7133,
+   "sat": 0.0788,
+   "cb": -0.0212,
+   "cr": -0.0395
+  },
+  "night_tricks": {
+   "p5": 0.0846,
+   "p50": 0.1405,
+   "p95": 0.5646,
+   "sat": 0.0531,
+   "cb": -0.0261,
+   "cr": 0.0169
+  },
+  "indoor": {
+   "p5": 0.1002,
+   "p50": 0.3468,
+   "p95": 0.6885,
+   "sat": 0.0406,
+   "cb": -0.0222,
+   "cr": 0.0024
+  }
+ }
+}

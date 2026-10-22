@@ -1,0 +1,88 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Video, audio and generated output: never commit footage or renders.
+*.ts
+*.m2ts
+*.mts
+*.mp4
+*.m4v
+*.mov
+*.mkv
+*.avi
+*.webm
+*.wav
+*.mp3
+*.aac
+*_highlight*.mp4
+*.partial.mp4
+output/
+outputs/
+footage/
+work/
+/res/
+frames/
+sheets/
+# Upper-case variants (case-sensitive file systems)
+*.TS
+*.MP4
+*.MOV
+*.MKV
+*.AVI
+# DVR sidecars, flight logs (may contain GPS) and editor projects
+*.srt
+*.SRT
+*.osd
+*.OSD
+*.bbl
+*.BBL
+*.bfl
+*.BFL
+*.bbs
+*.BBS
+btfl_*.csv
+LOG[0-9]*.csv
+log[0-9]*.csv
+*.event
+*.gpx
+*.kml
+*.drp
+*.drt
+# Analysis outputs
+*.analysis.json
+*.npy
+*.npz
+
+# Model weights and caches
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.gguf
+/models/
+.cache/
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

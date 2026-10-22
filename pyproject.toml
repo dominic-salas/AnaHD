@@ -1,0 +1,101 @@
+[project]
+name = "anahd"
+version = "0.1.0"
+description = "Clean HD 60 fps video from analog FPV goggle DVR recordings, offline"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Dominic Salas" }]
+requires-python = ">=3.11"
+# Each runtime dependency has its reason next to it.
+dependencies = [
+    "numpy>=2.0",                       # frame arithmetic
+    "opencv-python-headless>=4.10,<6",  # optical flow, remap, resize, filters
+    # The default GPU pipeline (CUDA build from the PyTorch index below); torchvision
+    # supplies RAFT-small and its weights. The learned restorer is plain PyTorch.
+    "torch>=2.5",
+    "torchvision>=0.20",
+]
+
+[project.optional-dependencies]
+# The desktop app (anahd-app). Qt for Python, LGPL-3.0, used as an unmodified library.
+app = ["PySide6-Essentials>=6.10"]
+# --no-learned --ai: spandrel loads the SPAN upscaler; TensorRT runs it fast enough.
+ai = ["spandrel>=0.4", "onnx>=1.16", "tensorrt-cu12>=10"]
+# Retraining only (anahd.learn): what the SeedVR2 teacher CLI needs. The SeedVR2 code and
+# its weights are an outside checkout; anahd itself never imports any of this.
+train = [
+    "diffusers>=0.33.1",
+    "einops>=0.8",
+    "gguf>=0.10",
+    "omegaconf>=2.3",
+    "peft>=0.17",
+    "psutil>=5.9",
+    "rotary-embedding-torch>=0.5.3",
+    "safetensors>=0.4",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+anahd = "anahd.cli:main"
+
+[project.gui-scripts]
+anahd-app = "anahd.app:main"
+
+[dependency-groups]
+build = [
+    "pyinstaller>=6.16",  # the standalone Windows app (scripts/build_windows.py)
+]
+dev = [
+    "PySide6-Essentials>=6.10",  # app tests and type checks
+    "mypy>=1.15",
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anahd"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["*.md"]  # Markdown code blocks are documentation, laid out by hand
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "PTH", "RUF"]
+ignore = ["S603", "S607"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "torch", "torch.*", "torchvision", "torchvision.*", "spandrel", "tensorrt"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = [
+    "gpu: needs torch and a CUDA GPU (skipped otherwise)",
+    "slow: end-to-end renders, about a minute (deselect with -m \"not slow\")",
+]
+
+# CUDA builds of PyTorch (PyPI's Windows wheels are CPU-only).
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }

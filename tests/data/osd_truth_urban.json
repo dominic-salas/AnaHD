@@ -1,0 +1,372 @@
+{
+ "clip": "urban",
+ "grid": "NTSC 30x13",
+ "source": "A box-by-box manual check of the urban clip's OSD layout, 2026-10-21; cells and glyph codes read off the reference frame (t=10 s)",
+ "classes": {
+  "fixed": "never changes (drawn from the font)",
+  "separator": "':' or '.' (never changes)",
+  "held": "changes rarely, in steps",
+  "live": "changes unpredictably",
+  "timer": "mm:ss digit generated from the clock"
+ },
+ "cells": [
+  {
+   "row": 0,
+   "col": 12,
+   "class": "fixed",
+   "glyph": 82
+  },
+  {
+   "row": 0,
+   "col": 13,
+   "class": "separator",
+   "glyph": 58
+  },
+  {
+   "row": 0,
+   "col": 14,
+   "class": "fixed",
+   "glyph": 56
+  },
+  {
+   "row": 0,
+   "col": 15,
+   "class": "separator",
+   "glyph": 58
+  },
+  {
+   "row": 0,
+   "col": 16,
+   "class": "held",
+   "glyph": 52
+  },
+  {
+   "row": 0,
+   "col": 17,
+   "class": "held",
+   "glyph": 48
+  },
+  {
+   "row": 0,
+   "col": 18,
+   "class": "held",
+   "glyph": 48
+  },
+  {
+   "row": 1,
+   "col": 23,
+   "class": "fixed",
+   "glyph": 33
+  },
+  {
+   "row": 1,
+   "col": 24,
+   "class": "fixed",
+   "glyph": 34
+  },
+  {
+   "row": 1,
+   "col": 25,
+   "class": "fixed",
+   "glyph": 35
+  },
+  {
+   "row": 1,
+   "col": 26,
+   "class": "fixed",
+   "glyph": 37
+  },
+  {
+   "row": 1,
+   "col": 27,
+   "class": "fixed",
+   "glyph": 38
+  },
+  {
+   "row": 2,
+   "col": 23,
+   "class": "fixed",
+   "glyph": 39
+  },
+  {
+   "row": 2,
+   "col": 24,
+   "class": "fixed",
+   "glyph": 44
+  },
+  {
+   "row": 2,
+   "col": 25,
+   "class": "fixed",
+   "glyph": 59
+  },
+  {
+   "row": 2,
+   "col": 26,
+   "class": "fixed",
+   "glyph": 61
+  },
+  {
+   "row": 2,
+   "col": 27,
+   "class": "fixed",
+   "glyph": 63
+  },
+  {
+   "row": 4,
+   "col": 23,
+   "class": "fixed",
+   "glyph": 146
+  },
+  {
+   "row": 4,
+   "col": 24,
+   "class": "held",
+   "glyph": null
+  },
+  {
+   "row": 4,
+   "col": 25,
+   "class": "separator",
+   "glyph": 46
+  },
+  {
+   "row": 4,
+   "col": 26,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 4,
+   "col": 27,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 4,
+   "col": 28,
+   "class": "fixed",
+   "glyph": 6
+  },
+  {
+   "row": 9,
+   "col": 26,
+   "class": "fixed",
+   "glyph": 114
+  },
+  {
+   "row": 9,
+   "col": 27,
+   "class": "fixed",
+   "glyph": 115
+  },
+  {
+   "row": 9,
+   "col": 28,
+   "class": "fixed",
+   "glyph": 116
+  },
+  {
+   "row": 10,
+   "col": 2,
+   "class": "fixed",
+   "glyph": 1
+  },
+  {
+   "row": 10,
+   "col": 3,
+   "class": "fixed",
+   "glyph": 45
+  },
+  {
+   "row": 10,
+   "col": 4,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 10,
+   "col": 5,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 10,
+   "col": 25,
+   "class": "fixed",
+   "glyph": 4
+  },
+  {
+   "row": 10,
+   "col": 27,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 10,
+   "col": 28,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 11,
+   "col": 2,
+   "class": "fixed",
+   "glyph": 123
+  },
+  {
+   "row": 11,
+   "col": 3,
+   "class": "held",
+   "glyph": null,
+   "also": [
+    "fixed"
+   ],
+   "override": "Marked live in the manual check; the footage shows '29' constant in a clip (Betaflight link quality 'rfMode:LQ%'): held/fixed, agreed on review"
+  },
+  {
+   "row": 11,
+   "col": 4,
+   "class": "held",
+   "glyph": null,
+   "also": [
+    "fixed"
+   ],
+   "override": "Marked live in the manual check; the footage shows '29' constant in a clip (Betaflight link quality 'rfMode:LQ%'): held/fixed, agreed on review"
+  },
+  {
+   "row": 11,
+   "col": 5,
+   "class": "separator",
+   "glyph": 58
+  },
+  {
+   "row": 11,
+   "col": 6,
+   "class": "live",
+   "glyph": null,
+   "override": "Marked held in the manual check; the footage shows the LQ% '100' dipping to 99, 93, 90 within urban: live, agreed on review"
+  },
+  {
+   "row": 11,
+   "col": 7,
+   "class": "live",
+   "glyph": null,
+   "override": "Marked held in the manual check; the footage shows the LQ% '100' dipping to 99, 93, 90 within urban: live, agreed on review"
+  },
+  {
+   "row": 11,
+   "col": 8,
+   "class": "live",
+   "glyph": null,
+   "override": "Marked held in the manual check; the footage shows the LQ% '100' dipping to 99, 93, 90 within urban: live, agreed on review"
+  },
+  {
+   "row": 11,
+   "col": 23,
+   "class": "fixed",
+   "glyph": 156
+  },
+  {
+   "row": 11,
+   "col": 24,
+   "class": "timer",
+   "glyph": null,
+   "also": [
+    "held",
+    "fixed"
+   ],
+   "note": "tens of minutes: the manual check for this box is ambiguous in the order (timer or 'good' on the green box); a held digit is what was marked on the same digit of the row below"
+  },
+  {
+   "row": 11,
+   "col": 25,
+   "class": "timer",
+   "glyph": null
+  },
+  {
+   "row": 11,
+   "col": 26,
+   "class": "separator",
+   "glyph": 58
+  },
+  {
+   "row": 11,
+   "col": 27,
+   "class": "timer",
+   "glyph": null
+  },
+  {
+   "row": 11,
+   "col": 28,
+   "class": "timer",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 2,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 3,
+   "class": "separator",
+   "glyph": 46
+  },
+  {
+   "row": 12,
+   "col": 4,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 5,
+   "class": "live",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 6,
+   "class": "fixed",
+   "glyph": 154
+  },
+  {
+   "row": 12,
+   "col": 23,
+   "class": "fixed",
+   "glyph": 155
+  },
+  {
+   "row": 12,
+   "col": 24,
+   "class": "held",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 25,
+   "class": "timer",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 26,
+   "class": "separator",
+   "glyph": 58
+  },
+  {
+   "row": 12,
+   "col": 27,
+   "class": "timer",
+   "glyph": null
+  },
+  {
+   "row": 12,
+   "col": 28,
+   "class": "timer",
+   "glyph": null
+  }
+ ]
+}
