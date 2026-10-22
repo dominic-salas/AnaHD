@@ -198,7 +198,7 @@ class RemasterParams:
     )  # fmt: skip
     # ----- Advanced -----
     osd_redraw: bool = _switch(
-        "Redraw OSD from my font (experimental)", False, "Advanced",
+        "Redraw OSD from my font", False, "Advanced",
         "Re-draw the on-screen text crisply from a Betaflight font. Experimental: it can "
         "draw wrong characters",
         experimental=True,
