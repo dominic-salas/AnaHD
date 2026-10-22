@@ -96,7 +96,7 @@ when you close the window while nothing is being cleaned.
 ...). They are never overwritten, and your recordings are never changed: renders go to a
 `.partial.mp4` that is renamed only once its frame count checks out, so a failed or stopped
 run leaves nothing behind. 1440x1080 for 4:3 pictures (1920x1080 for 16:9), the recording's
-frame rate, H.264, no audio (DVR audio is VTX noise).
+frame rate, H.264, with the recording's sound (AAC, kept in sync through cuts and parts).
 
 **Command line** (`anahd-cli.exe` in the install folder, or `anahd` from source):
 

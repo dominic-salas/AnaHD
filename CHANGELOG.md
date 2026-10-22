@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 (2026-10-22)
+
+- The app's look now matches dvsalas.com: charcoal surfaces, an amber accent, Space
+  Grotesk and Geist Mono (bundled, SIL Open Font License), sentence-case labels. Layout
+  and features are unchanged.
+- Outputs keep the recording's sound, in sync with the picture after cuts, joins and
+  parts (the DVR's late-starting sound is padded with silence, not slid early).
+- `.ts` recordings no longer fail to start ("could not count frames").
+- The settings panel is never cut off on the right.
+
 ## 0.1.0 (2026-10-22)
 
 First public version.
