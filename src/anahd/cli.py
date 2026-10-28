@@ -14,7 +14,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from anahd import __version__, bundle
@@ -186,6 +186,10 @@ def remaster_args(params: RemasterParams) -> list[str]:
 
 
 Report = Callable[[int, int | None, float], None]  # frames done, total if known, fps
+StageReport = Callable[[str], None]  # what is being done before the first frame
+# A live before/after picture (JPEGs) of output frame ``n`` (from 1, counted over the whole
+# output, cuts included) of ``total``.
+LivePicture = Callable[[bytes, bytes, int, int], None]
 REPORT_EVERY = 30  # frames
 
 
@@ -217,10 +221,18 @@ def planned_outputs(src: Path, out: Path, args: argparse.Namespace) -> list[Path
 
 
 def render(
-    src: Path, out: Path, args: argparse.Namespace, report: Report | None = None
+    src: Path,
+    out: Path,
+    args: argparse.Namespace,
+    report: Report | None = None,
+    stage_report: StageReport | None = None,
+    picture: LivePicture | None = None,
 ) -> tuple[Result, float]:
     """Clean ``src`` into ``out`` as ``args`` say (with --parts, one file per kept part:
-    see :func:`planned_outputs`); the result and the seconds it took."""
+    see :func:`planned_outputs`); the result and the seconds it took. ``stage_report`` and
+    ``picture`` are for the app's live view (the GPU path makes pictures; the CPU path
+    only reports stages)."""
+    say = stage_report or (lambda _what: None)
     if not src.is_file():
         raise AnaHDError(f"{src} not found")
     if out.resolve() == src.resolve():
@@ -231,6 +243,8 @@ def render(
     if not (cuts and getattr(args, "parts", False)):
         _check_free([out], args.force)  # before any work (part names need the frame count)
     whole = not (args.start or args.duration)
+    if whole:
+        say("Counting frames")
     packets = count_frames(src) if whole else None
     began = time.monotonic()
     done_before = 0  # frames of earlier parts, when cleaning a cut recording part by part
@@ -241,6 +255,12 @@ def render(
         if report is not None and done % REPORT_EVERY == 0:
             total = expected if cuts else packets
             report(done, total, done / max(time.monotonic() - began, 1e-6))
+
+    def part_picture(before: bytes, after: bytes, n: int) -> None:
+        if picture is not None:
+            picture(before, after, done_before + n + 1, (expected if cuts else packets) or 0)
+
+    hooks = Hooks(say, part_picture if picture is not None else None)
 
     steady = SteadyConfig() if args.steady else None
     remaster = remaster_params(args)
@@ -272,6 +292,7 @@ def render(
             finals = part_outputs(out, len(spans)) if separate else [out]
             _check_free(finals, args.force)
             expected = sum(s.frames for s in spans)
+            say("Measuring the picture area and OSD")
             measured = measure(src, info, Options())  # one look for every part
             frames, made, sounds = 0, [], []
             for n, span in enumerate(spans):
@@ -289,7 +310,9 @@ def render(
                     remaster=remaster,
                 )
                 done_before = frames
-                part_result = _clean_with_one_retry(src, part, opts, args, progress, measured)
+                part_result = _clean_with_one_retry(
+                    src, part, opts, args, progress, measured, hooks
+                )
                 if not span.frames * (1 - MAX_UNREADABLE) - 1 <= part_result.frames <= span.frames:
                     raise AnaHDError(
                         f"{src}: read {part_result.frames} of {span.frames} frames "
@@ -318,7 +341,7 @@ def render(
             opts = Options(
                 start=args.start, duration=args.duration, steady=steady, remaster=remaster
             )
-            result = _clean_with_one_retry(src, tmp, opts, args, progress)
+            result = _clean_with_one_retry(src, tmp, opts, args, progress, hooks=hooks)
             # A packet the decoder rejects (a breakup burst) yields no frame, so the
             # source's packet count may be slightly above what could be read.
             if packets is not None and not (
@@ -333,6 +356,14 @@ def render(
         for temp in temps:
             temp.unlink(missing_ok=True)
     return result, time.monotonic() - began
+
+
+@dataclass(frozen=True)
+class Hooks:
+    """The live view's callbacks, passed down to one clean."""
+
+    stage: StageReport | None = None
+    picture: Callable[[bytes, bytes, int], None] | None = None  # n from 0 in this clean
 
 
 def _check_free(outputs: list[Path], force: bool) -> None:
@@ -382,11 +413,12 @@ def _clean_with_one_retry(
     args: argparse.Namespace,
     progress: Callable[[int], None],
     measured: Measured | None = None,
+    hooks: Hooks | None = None,
 ) -> Result:
     """Clean once; if FFmpeg ran out of memory, free what this process holds and try once
     more. A second failure is reported with the system's memory state."""
     try:
-        return _clean(src, tmp, opts, args, progress, measured)
+        return _clean(src, tmp, opts, args, progress, measured, hooks)
     except MediaError as exc:
         if not _out_of_memory(exc):
             raise
@@ -397,7 +429,7 @@ def _clean_with_one_retry(
 
         torch.cuda.empty_cache()
     try:
-        return _clean(src, tmp, opts, args, progress, measured)
+        return _clean(src, tmp, opts, args, progress, measured, hooks)
     except MediaError as exc:
         if not _out_of_memory(exc):
             raise
@@ -416,9 +448,19 @@ def _clean(
     args: argparse.Namespace,
     progress: Callable[[int], None],
     measured: Measured | None = None,
+    hooks: Hooks | None = None,
 ) -> Result:
+    hooks = hooks or Hooks()
     if args.cpu:
-        return enhance(src, tmp, opts, overwrite=True, progress=progress, measured=measured)
+        return enhance(
+            src,
+            tmp,
+            opts,
+            overwrite=True,
+            progress=progress,
+            measured=measured,
+            stage_report=hooks.stage,
+        )
     if args.steady:
         raise AnaHDError("--steady runs on the CPU only; add --cpu")
     try:
@@ -443,6 +485,8 @@ def _clean(
         nvenc=args.nvenc,
         progress=progress,
         measured=measured,
+        stage_report=hooks.stage,
+        picture=hooks.picture,
     )
 
 
