@@ -351,9 +351,9 @@ def test_preview_matches_the_same_frame_of_a_full_render(
     sent: list[Tensor] = []
     put = gp._Writer.put
 
-    def keep(self: gp._Writer, packed: Tensor) -> None:
+    def keep(self: gp._Writer, packed: Tensor, extra: object = None) -> None:
         sent.append(packed.clone())
-        put(self, packed)
+        put(self, packed, extra)
 
     monkeypatch.setattr(gp._Writer, "put", keep)
     assert cli.main([str(clip.path)]) == 0
