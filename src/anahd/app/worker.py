@@ -1,7 +1,10 @@
 """Clean one clip in a separate process, so the window stays responsive and a stop is a
 clean kill (CUDA, FFmpeg pipes and all). The process runs the same code as ``anahd``.
 
-The worker puts tuples on a queue: ``("progress", done, total, fps)``, then either
+The worker puts tuples on a queue. Ongoing (any number, only the newest of each kind
+matters): ``("stage", text)`` (what it is doing before the first frame),
+``("progress", done, total, fps, time)`` and ``("frame", before_jpg, after_jpg, n, total)``
+(a live before/after picture of output frame ``n``). Then exactly one ending:
 ``("done", frames, seconds, (x, y, w, h), notes)`` or ``("failed", message)``.
 """
 
@@ -18,6 +21,8 @@ from typing import Any
 from PySide6.QtCore import QObject, QTimer, Signal
 
 POLL_MS = 200
+ONGOING = ("stage", "progress", "frame")
+ENDINGS = ("done", "failed")
 
 
 def cli_args(
@@ -54,6 +59,7 @@ def work(
     remaster: dict[str, Any] | None = None,
 ) -> None:
     """The worker process's main: never raises, always ends with "done" or "failed"."""
+    messages.put(("stage", "Starting"))
     from anahd import bundle, cli
     from anahd.errors import AnaHDError
 
@@ -68,6 +74,8 @@ def work(
                 lambda done, total, fps: messages.put(
                     ("progress", done, total, fps, time.monotonic())
                 ),
+                lambda text: messages.put(("stage", text)),
+                lambda before, after, n, total: messages.put(("frame", before, after, n, total)),
             )
         c = result.crop
         messages.put(("done", result.frames, took, (c.x, c.y, c.width, c.height), result.notes))
@@ -81,6 +89,8 @@ class Runner(QObject):
     """Runs one clip at a time in a worker process and relays what it says as signals."""
 
     progress = Signal(object, int, int, float)  # source, frames done, total (0 = unknown), time
+    stage = Signal(object, str)  # source, what it is doing before the first frame
+    frame = Signal(object, bytes, bytes, int, int)  # source, before, after (JPEG), n, total
     finished = Signal(object, object)  # source, done tuple (frames, seconds, crop, notes)
     failed = Signal(object, str)  # source, message
 
@@ -148,28 +158,34 @@ class Runner(QObject):
         q, proc, src = self._queue, self._proc, self._src
         if q is None or proc is None or src is None:
             return
-        last: tuple[Any, ...] | None = None
+        newest: dict[str, tuple[Any, ...]] = {}
         while True:
             try:
                 msg = q.get_nowait()
             except queue.Empty:
                 break
-            if msg[0] == "progress":
-                last = msg
+            if msg[0] in ONGOING:
+                newest[msg[0]] = msg
                 continue
-            self._end()
+            if msg[0] not in ENDINGS:
+                continue  # a kind this version does not know: never an ending
+            self._end()  # what was still ongoing in this poll is dropped with the clip
             proc.join(10)
             if msg[0] == "done":
                 self.finished.emit(src, msg[1:])
             else:
                 self.failed.emit(src, str(msg[1]))
             return
-        if last is not None:
-            self.progress.emit(src, int(last[1]), int(last[2] or 0), float(last[4]))
+        if (m := newest.get("stage")) is not None:
+            self.stage.emit(src, str(m[1]))
+        if (m := newest.get("progress")) is not None:
+            self.progress.emit(src, int(m[1]), int(m[2] or 0), float(m[4]))
+        if (m := newest.get("frame")) is not None:
+            self.frame.emit(src, bytes(m[1]), bytes(m[2]), int(m[3]), int(m[4]))
         if not proc.is_alive():
             # Its last message may still be in the pipe: wait for it briefly.
             try:
-                while (msg := q.get(timeout=1.0))[0] == "progress":
+                while (msg := q.get(timeout=1.0))[0] not in ENDINGS:
                     pass
             except queue.Empty:
                 msg = ("failed", f"the worker stopped unexpectedly (exit code {proc.exitcode})")

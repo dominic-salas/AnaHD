@@ -16,7 +16,17 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEventLoop, QPoint, QRect, QSettings, Qt, QTimer
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEventLoop,
+    QItemSelectionModel,
+    QLocale,
+    QPoint,
+    QRect,
+    QSettings,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QCloseEvent, QColor, QImage, QPainter, QStandardItemModel
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -239,6 +249,8 @@ def test_progress_is_shown_per_clip_and_overall(
 def test_worker_reports_failure_instead_of_raising(tmp_path: Path) -> None:
     messages: queue.Queue[tuple[Any, ...]] = queue.Queue()
     worker.work(str(tmp_path / "missing.mp4"), str(tmp_path / "out.mp4"), messages)  # type: ignore[arg-type]
+    first = messages.get_nowait()
+    assert first[0] == "stage", "the card says something before the slow imports"
     kind, text = messages.get_nowait()
     assert kind == "failed" and "not found" in text
     assert not (tmp_path / "out.mp4").exists()
@@ -752,3 +764,190 @@ def test_settings_panel_is_never_cut_off_on_the_right(window: MainWindow) -> Non
         assert body.minimumSizeHint().width() <= panel.viewport().width(), theme_name
         # ...and no row is so wide that the panel squeezes the clip list next to it
         assert panel.minimumSizeHint().width() <= 320, theme_name
+
+
+# ----- the live view: stages, pictures, following the batch -----
+
+
+class _AliveProc:
+    exitcode: int | None = None
+
+    def is_alive(self) -> bool:
+        return True
+
+    def join(self, timeout: float | None = None) -> None:
+        pass
+
+
+def _runner(
+    tmp_path: Path,
+) -> tuple[worker.Runner, queue.Queue[tuple[Any, ...]], dict[str, list[Any]]]:
+    r = worker.Runner()
+    q: queue.Queue[tuple[Any, ...]] = queue.Queue()
+    r._queue, r._proc, r._src = q, _AliveProc(), tmp_path / "a.mp4"  # type: ignore[assignment]
+    got: dict[str, list[Any]] = {
+        k: [] for k in ("stage", "progress", "frame", "finished", "failed")
+    }
+    r.stage.connect(lambda *a: got["stage"].append(a))
+    r.progress.connect(lambda *a: got["progress"].append(a))
+    r.frame.connect(lambda *a: got["frame"].append(a))
+    r.finished.connect(lambda *a: got["finished"].append(a))
+    r.failed.connect(lambda *a: got["failed"].append(a))
+    return r, q, got
+
+
+def test_ongoing_messages_never_end_a_clip(qapp: QApplication, tmp_path: Path) -> None:
+    r, q, got = _runner(tmp_path)
+    q.put(("stage", "Starting"))
+    q.put(("stage", "Loading the models"))
+    q.put(("frame", b"b1", b"a1", 1, 100))
+    q.put(("frame", b"b2", b"a2", 90, 100))
+    q.put(("progress", 30, 100, 20.0, 5.0))
+    q.put(("from a newer version", 1))
+    r._poll()
+    assert r.busy and not got["failed"] and not got["finished"]
+    assert got["stage"] == [(r._src, "Loading the models")]  # the newest of each kind
+    assert got["frame"] == [(r._src, b"b2", b"a2", 90, 100)]
+    assert got["progress"] == [(r._src, 30, 100, 5.0)]
+
+
+def test_an_ending_drops_what_was_still_ongoing(qapp: QApplication, tmp_path: Path) -> None:
+    r, q, got = _runner(tmp_path)
+    q.put(("frame", b"b", b"a", 5, 10))
+    q.put(("done", 10, 1.0, (0, 0, 8, 8), ""))
+    r._poll()
+    assert got["finished"] and not got["frame"] and not r.busy
+
+
+def test_a_trailing_picture_after_the_worker_exits_is_not_a_failure(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    r, q, got = _runner(tmp_path)
+
+    class Gone(_AliveProc):
+        exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+    r._proc = Gone()  # type: ignore[assignment]
+    q.put(("frame", b"b", b"a", 5, 10))
+    q.put(("stage", "Cleaning"))
+    q.put(("done", 10, 1.0, (0, 0, 8, 8), ""))
+    r._poll()
+    assert got["finished"] and not got["failed"]
+
+
+def _pick(window: MainWindow, row: int) -> None:
+    """A click: this clip alone is selected."""
+    window._list.setCurrentRow(row, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+
+
+def _busy(monkeypatch: pytest.MonkeyPatch, window: MainWindow, on: bool = True) -> None:
+    monkeypatch.setattr(type(window._runner), "busy", property(lambda self: on))
+
+
+def _jpeg(color: int) -> bytes:
+    import cv2
+    import numpy as np
+
+    ok, data = cv2.imencode(".jpg", np.full((48, 64, 3), color, np.uint8))
+    assert ok
+    return bytes(data.tobytes())
+
+
+def test_clean_selects_the_clip_and_shows_it_live(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[Path] = []
+    monkeypatch.setattr(window._runner, "start", lambda src, *a: started.append(src))
+    requests: list[object] = []
+    monkeypatch.setattr(window._previewer, "request", requests.append)
+    a, _b = _clip(window, tmp_path, "a.mp4"), _clip(window, tmp_path, "b.mp4")
+    _pick(window, 1)  # looking at b
+    requests.clear()
+    _busy(monkeypatch, window)
+    window._start_all()
+    assert started == [a.path] and window._selected() is a, "Clean shows what it cleans"
+    assert not requests, "no GPU preview while the GPU is cleaning"
+    assert window._preview_heading.text() == "Preview · before / after paused while cleaning"
+
+    window._stage_reported(a.path, "Loading the models")
+    assert a.item.data(STATUS) == "Loading the models..."
+    window._live_picture(a.path, _jpeg(40), _jpeg(200), 1200, 600)
+    assert window._stage.currentWidget() is window._frame_wipe
+    assert not window._live_row.isHidden()
+    assert "Frame 1,200 of 600" in window._live_caption.text()
+    assert "0:20 into the cleaned clip" in window._live_caption.text()
+    assert window._preview_heading.text().startswith("Cleaning · live")
+
+    _pick(window, 1)  # the user looks at b meanwhile: its plain frame
+    assert not requests and window._preview_heading.text().endswith("paused while cleaning")
+    _pick(window, 0)  # back to a: the latest picture at once
+    assert window._stage.currentWidget() is window._frame_wipe
+
+
+def test_the_live_view_follows_the_batch_unless_the_user_looked_away(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[Path] = []
+    monkeypatch.setattr(window._runner, "start", lambda src, *a: started.append(src))
+    monkeypatch.setattr(window._previewer, "request", lambda req: None)
+    a, b, c = (_clip(window, tmp_path, f"{n}.mp4") for n in "abc")
+    _busy(monkeypatch, window)
+    window._start_all()
+    window._finished(a.path, (600, 10.0, (0, 0, 960, 720), ""))
+    assert started == [a.path, b.path] and window._selected() is b, "followed to b"
+    window._live_picture(a.path, _jpeg(1), _jpeg(2), 5, 600)  # late picture of a: ignored
+    assert a.path not in window._live
+    _pick(window, 0)  # the user looks at a (done)
+    window._failed(b.path, "boom")
+    assert started == [a.path, b.path, c.path] and window._selected() is a, "not taken away"
+
+
+def test_a_preview_asked_for_before_clean_is_not_shown_after(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from anahd.app.framepreview import Request, Shown
+
+    a = _clip(window, tmp_path, "a.mp4")
+    _pick(window, 0)
+    _busy(monkeypatch, window)
+    image = QImage(64, 48, QImage.Format.Format_RGB888)
+    shown = Shown(Request(a.path, 0.0, RemasterParams(), True), image, image, 0.0)
+    window._stage.setCurrentWidget(window._screen)
+    window._preview_ready(shown)
+    assert window._stage.currentWidget() is window._screen
+
+
+def test_finish_time_uses_the_speed_measured_here(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from anahd.app import window as win_mod
+
+    a, b = _clip(window, tmp_path, "a.mp4"), _clip(window, tmp_path, "b.mp4")
+    a.state, b.state = "cleaning", "queued"
+    window._batch = [a, b]
+    assert window._finish_time() == "", "nothing while the time left is settling"
+    now = time.monotonic()
+    # Running at 40 fps (an estimate of 20 fps would have said twice as long): b's 10 s at
+    # 60 fps is 600 frames, 15 s here, plus its start-up.
+    window._left = (100.0, 40.0, now)
+    seen: list[int] = []
+
+    class Clock:
+        @staticmethod
+        def currentTime() -> Any:
+            class T:
+                def addSecs(self, s: int) -> int:
+                    seen.append(s)
+                    return s
+
+            return T()
+
+    monkeypatch.setattr(win_mod, "QTime", Clock)
+    monkeypatch.setattr(QLocale, "toString", lambda self, t, f: f"t+{t}")
+    assert window._finish_time() == f"t+{seen[-1]}"
+    assert abs(seen[-1] - (100 + 15 + win_mod.START_S)) <= 1
+    window._left = None  # a retry: its time left is settling again
+    assert window._finish_time() == ""
