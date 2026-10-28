@@ -124,7 +124,13 @@ def _assert_in_sync(video: Path, expected: int) -> None:
 
 
 def _passthrough(
-    src: Path, tmp: Path, opts: object, args: object, progress: object, measured: object = None
+    src: Path,
+    tmp: Path,
+    opts: object,
+    args: object,
+    progress: object,
+    measured: object = None,
+    hooks: object = None,
 ) -> Result:
     """Stands in for the cleaning: the same reading of the recording (seek, frame count),
     written unchanged."""

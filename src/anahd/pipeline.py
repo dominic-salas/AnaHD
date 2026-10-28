@@ -123,10 +123,15 @@ def enhance(
     overwrite: bool = False,
     progress: Progress | None = None,
     measured: Measured | None = None,
+    stage_report: Callable[[str], None] | None = None,
 ) -> Result:
     """``measured``: the recording's measurement, when cleaning parts of it one by one
-    (cuts), so every part gets the same crop, OSD mask and tone curve."""
+    (cuts), so every part gets the same crop, OSD mask and tone curve. ``stage_report``
+    hears what is being done before the first frame."""
+    say = stage_report or (lambda _what: None)
     info = probe(src)
+    if measured is None:
+        say("Measuring the picture area and OSD")
     meas = measured or measure(src, info, opts)
     crop, osd, curve, size, cropped = meas.crop, meas.osd, meas.curve, meas.size, meas.samples
     osd_half = np.asarray(
@@ -173,6 +178,7 @@ def enhance(
             fuser.prepare(_full_range(f, info))
             for f in read_frames(src, info, crop, start=opts.start, duration=opts.duration)
         )
+        say("Cleaning")
         for done, (center, neighbours) in enumerate(_windows(frames, opts.clean.radius), 1):
             y, u, v = fuser.fuse(center, neighbours)
             y = clean.destripe(y, osd, opts.clean)

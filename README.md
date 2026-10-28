@@ -79,9 +79,13 @@ minutes. **Reset to defaults** brings back the approved look; the settings are r
 between runs.
 
 Everything is decided before you press **Clean**, and the clean renders exactly what the
-preview showed. Clips are then cleaned one after
-another in the background, each with its progress and time left; nothing asks you
-anything until they are done.
+preview showed. Clips are then cleaned one after another in the background, each with its
+progress and time left, and the header says when the batch should be done; nothing asks
+you anything until they are done. **While a clip is cleaned you watch it:** the preview
+shows the frame just cleaned against the recording's, every second and a half (drag the
+line), with the frame number and a Stop under it, so a setting that looks wrong in motion
+can be stopped a minute in. The view follows the batch from clip to clip unless you pick
+another clip to look at.
 
 **2 Results.** Each output against its recording at the same moment: drag the line across
 the picture, slide through the clip. **Open output** and **Show in folder** are there too,

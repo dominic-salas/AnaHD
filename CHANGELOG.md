@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.2 (2026-10-28)
+
+- **Watch the clean as it happens.** While a clip is cleaned, the preview shows the frame
+  just cleaned against the recording's, updated every second and a half: drag the line
+  across it as on the Results page. The frame number and the point in the clip are under
+  it, with a Stop right there, so a setting that looks wrong in motion costs a minute, not
+  the whole clip. Pressing Clean shows the clip being cleaned, and the view follows the
+  batch from clip to clip unless you have picked another clip to look at.
+- Before the first frame, the clip's card says what is happening (counting frames,
+  measuring the picture area and OSD, loading the models) instead of "Starting...".
+- The header and the tray say when the whole batch should be done ("done about 6:41 PM"),
+  from the speed measured on your own GPU.
+- While a clip is cleaned, other clips show their plain frame: the before/after preview
+  waits, so it never competes with the clean for the GPU.
+- The output is unchanged, bit for bit.
+
 ## 0.1.1 (2026-10-22)
 
 - The app's look now matches dvsalas.com: charcoal surfaces, an amber accent, Space

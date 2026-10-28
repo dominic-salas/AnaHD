@@ -1,6 +1,6 @@
 [project]
 name = "anahd"
-version = "0.1.1"
+version = "0.1.2"
 description = "Clean HD 60 fps video from analog FPV goggle DVR recordings, offline"
 readme = "README.md"
 license = "MIT"

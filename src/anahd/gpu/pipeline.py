@@ -8,7 +8,10 @@ so decoding, cleaning and encoding overlap.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
+import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +22,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from anahd import snapshot as snap
 from anahd.clean import CleanConfig
 from anahd.errors import AnaHDError, MediaError
 from anahd.gpu import ops
@@ -958,6 +962,11 @@ def background(it: Iterator[np.ndarray], depth: int = 16) -> Iterator[np.ndarray
 
 
 Progress = Callable[[int], None]
+Stage = Callable[[str], None]  # what the clean is doing, before the first frame
+# A live picture: the recording's frame and the cleaned one (JPEG), and the output frame's
+# number in this call (from 0).
+Picture = Callable[[bytes, bytes, int], None]
+RAW_KEEP = 32  # recent raw frames kept to pair with the output (it lags by the window)
 
 
 def enhance(
@@ -970,14 +979,22 @@ def enhance(
     nvenc: bool = False,
     progress: Progress | None = None,
     measured: Measured | None = None,
+    stage_report: Stage | None = None,
+    picture: Picture | None = None,
 ) -> Result:
-    """``measured``: the whole recording's measurement, when cleaning it part by part."""
+    """``measured``: the whole recording's measurement, when cleaning it part by part.
+    ``stage_report`` hears what is being done before the first frame; ``picture`` gets a
+    before/after pair of the output now and then (see :mod:`anahd.snapshot`)."""
+    say = stage_report or (lambda _what: None)
     if opts.steady is not None:
         raise AnaHDError("--steady runs on the CPU only; add --cpu")
     device = cuda_device()
     gcfg = gcfg or GpuConfig()
     info = probe(src)
+    if measured is None:
+        say("Measuring the picture area and OSD")
     meas = measured or measure(src, info, opts)
+    say("Loading the models")
     params = opts.remaster
     cleaner = Cleaner(
         meas.crop,
@@ -1001,6 +1018,7 @@ def enhance(
 
             num, _, den = info.fps.partition("/")
             fps = int(num) / int(den or 1)
+            say("Reading the OSD")
             try:
                 layout = analyze_clip(
                     src,
@@ -1023,26 +1041,63 @@ def enhance(
     w, h = stage.out_size if stage is not None else meas.size
     frame_bytes = w * h + 2 * ((w // 2) * (h // 2))
     encoder = Encoder(out, w, h, info, overwrite=overwrite, ready=True, nvenc=nvenc)
-    writer = _Writer(encoder, frame_bytes, device)
+    # Live pictures: output frame n is the recording's frame n (the remaster stage only
+    # delays frames), so the main loop keeps the last few raw frames and, when a picture is
+    # due, hands the writer the matching one with the output; the writer thread makes the
+    # pair once the output's bytes have landed.
+    recent: deque[tuple[int, np.ndarray]] = deque(maxlen=RAW_KEEP)
+    throttle = snap.Throttle()
+    raw_w, raw_h = meas.crop.width, meas.crop.height
+
+    def make_picture(frame: np.ndarray, extra: object) -> None:
+        if picture is None or not isinstance(extra, tuple):
+            return
+        n, raw = extra
+        before = snap.to_bgr(raw, raw_w, raw_h, full_range=info.full_range, bt709=info.bt709)
+        after = snap.to_bgr(frame, w, h, full_range=False, bt709=True)  # the encoder's format
+        # In the output's shape, so the line splits one picture (SuperView, stabilisation
+        # zoom and non-square SD pixels change the shape; the Results view does the same).
+        before = cv2.resize(before, (after.shape[1], after.shape[0]), interpolation=cv2.INTER_AREA)
+        picture(snap.jpeg(before), snap.jpeg(after), n)
+
+    writer = _Writer(encoder, frame_bytes, device, make_picture if picture else None)
     half = (meas.size[0] // 2, meas.size[1] // 2)
+    made = 0  # output frames handed to the writer
+
+    def put(packed: Tensor) -> None:
+        nonlocal made
+        extra = None
+        if picture is not None and throttle.due(time.monotonic()):
+            raw = next((r for n, r in recent if n == made), None)
+            extra = None if raw is None else (made, raw)
+        writer.put(packed, extra)
+        made += 1
+
+    def remember(frames: Iterator[np.ndarray]) -> Iterator[np.ndarray]:
+        for n, raw in enumerate(frames):
+            if picture is not None:
+                recent.append((n, raw))
+            yield raw
+
     try:
         with torch.inference_mode():
             raws = background(
                 read_raw(src, info, meas.crop, start=opts.start, duration=opts.duration)
             )
-            prepared = (cleaner.prepare(raw) for raw in raws)
+            prepared = (cleaner.prepare(raw) for raw in remember(raws))
+            say("Cleaning")
             for done, (centre, nbs) in enumerate(_windows(prepared, opts.clean.radius), 1):
                 if stage is None:
-                    writer.put(cleaner.clean(centre, nbs))
+                    put(cleaner.clean(centre, nbs))
                 else:
                     y, u, v = cleaner.clean_planes(centre, nbs)
                     for packed in stage.push(RFrame(y, u, v, cleaner.flows_at(half))):
-                        writer.put(packed)
+                        put(packed)
                 if progress is not None:
                     progress(done)
             if stage is not None:
                 for packed in stage.flush():
-                    writer.put(packed)
+                    put(packed)
         writer.close()
         encoder.close()
     except BaseException:
@@ -1087,47 +1142,70 @@ def steady_warp(
 
 class _Writer:
     """Copies finished frames to pinned host memory without waiting, and feeds the encoder
-    from a thread once each copy has landed."""
+    from a thread once each copy has landed. A frame ``put`` with ``extra`` is also handed,
+    with its landed bytes, to ``picture`` on that thread (the live view's pictures), before
+    its buffer is reused."""
 
     SLOTS = 6
 
-    def __init__(self, encoder: Encoder, frame_bytes: int, device: torch.device) -> None:
+    def __init__(
+        self,
+        encoder: Encoder,
+        frame_bytes: int,
+        device: torch.device,
+        picture: Callable[[np.ndarray, object], None] | None = None,
+    ) -> None:
         self.encoder = encoder
         self.device = device
+        self.picture = picture
+        self._picture_failed = False
         self.bufs = [
             torch.empty(frame_bytes, dtype=torch.uint8, pin_memory=True) for _ in range(self.SLOTS)
         ]
         self.free: queue.Queue[int] = queue.Queue()
         for i in range(self.SLOTS):
             self.free.put(i)
-        self.todo: queue.Queue[tuple[int, torch.cuda.Event] | None] = queue.Queue()
+        self.todo: queue.Queue[tuple[int, torch.cuda.Event, object] | None] = queue.Queue()
         self.error: BaseException | None = None
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    def put(self, packed: Tensor) -> None:
+    def put(self, packed: Tensor, extra: object = None) -> None:
         if self.error is not None:
             raise self.error
         i = self.free.get()
         self.bufs[i].copy_(packed, non_blocking=True)
         event = torch.cuda.Event()  # type: ignore[no-untyped-call, unused-ignore]
         event.record()
-        self.todo.put((i, event))
+        self.todo.put((i, event, extra))
 
     def _run(self) -> None:
         while True:
             item = self.todo.get()
             if item is None:
                 return
-            i, event = item
+            i, event, extra = item
             try:
                 if self.error is None:
                     event.synchronize()
                     self.encoder.write_raw(self.bufs[i].numpy().data)
+                    if extra is not None and self.picture is not None:
+                        self._take_picture(self.bufs[i].numpy(), extra)
             except BaseException as exc:  # reported on the next put or at close
                 self.error = exc
             finally:
                 self.free.put(i)
+
+    def _take_picture(self, frame: np.ndarray, extra: object) -> None:
+        """A failed picture is skipped (and said once); the render goes on."""
+        if self.picture is None:
+            return
+        try:
+            self.picture(frame, extra)
+        except (cv2.error, ValueError) as exc:
+            if not self._picture_failed:
+                self._picture_failed = True
+                print(f"\nanahd: live picture skipped ({exc})", file=sys.stderr)
 
     def close(self) -> None:
         self.todo.put(None)

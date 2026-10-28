@@ -21,7 +21,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QItemSelectionModel, QLocale, QSettings, Qt, QTime
 from PySide6.QtGui import QAction, QCloseEvent, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -77,6 +77,10 @@ VIDEO = {".mp4", ".ts", ".mov", ".avi", ".mkv", ".m2ts", ".mts"}
 
 DROP_PAGE, CLIPS_PAGE, RESULTS_PAGE = 0, 1, 2
 WAITING, QUEUED, CLEANING, DONE, FAILED = "waiting", "queued", "cleaning", "done", "failed"
+PAUSED_HEADING = "Preview · Paused: before / after with your settings; drag the line"
+LIVE_HEADING = "Cleaning · live: before / after as it is cleaned; drag the line"
+BUSY_HEADING = "Preview · before / after paused while cleaning"
+START_S = 9.0  # a queued clip's start-up (measuring, loading the models)
 
 
 @dataclass
@@ -230,6 +234,7 @@ class MainWindow(QMainWindow):
         self._page = CLIPS_PAGE
         self._playing = False
         self._etas: dict[Path, Eta] = {}
+        self._left: tuple[float, float, float] | None = None  # time left, fps, when
         self._previewer = FramePreviewer(self)
         self._previewer.ready.connect(self._preview_ready)
         self._previewer.failed.connect(self._preview_failed)
@@ -237,6 +242,8 @@ class MainWindow(QMainWindow):
 
         self._runner = Runner(self)
         self._runner.progress.connect(self._progress)
+        self._runner.stage.connect(self._stage_reported)
+        self._runner.frame.connect(self._live_picture)
         self._runner.finished.connect(self._finished)
         self._runner.failed.connect(self._failed)
         self._reader = FrameReader(self)
@@ -371,18 +378,25 @@ class MainWindow(QMainWindow):
         self._previewer.busy.connect(
             lambda on: self._preview_state.setText("Rendering preview..." if on else "")
         )
-        heading_row = row(
-            eyebrow("Preview · Paused: before / after with your settings; drag the line"),
-            1,
-            self._preview_state,
-            self._spinner,
-        )
+        self._preview_heading = eyebrow(PAUSED_HEADING)
+        heading_row = row(self._preview_heading, 1, self._preview_state, self._spinner)
+        # While a clip is cleaning: its latest before/after, where it is, and a Stop at hand.
+        self._live_caption = eyebrow()
+        self._live_stop = button("Stop", self._stop_all)
+        self._live_row = QWidget()
+        live_layout = QHBoxLayout(self._live_row)
+        live_layout.setContentsMargins(0, 0, 0, 0)
+        live_layout.addWidget(self._live_caption, 1)
+        live_layout.addWidget(self._live_stop)
+        self._live_row.setVisible(False)
+        self._live: dict[Path, tuple[bytes, bytes, int, int]] = {}  # latest picture per clip
         right = QWidget()
         rcol = QVBoxLayout(right)
         rcol.setContentsMargins(0, 0, 0, 0)
         rcol.setSpacing(10)
         rcol.addLayout(heading_row)
         rcol.addWidget(self._stage, 1)
+        rcol.addWidget(self._live_row)
         rcol.addWidget(self._timeline)
         rcol.addWidget(self._editor)
         rcol.addLayout(row(self._play, self._time, 1, self._keeps, self._include, self._cut))
@@ -689,7 +703,51 @@ class MainWindow(QMainWindow):
         self._last_shown = None
         self._stage.setCurrentWidget(self._screen)
         self._show_still(self._timeline.playhead)
+        self._show_live()
         self._update_cut_controls()
+
+    # ----- the live view: the clip being cleaned, as it is cleaned -----
+
+    def _stage_reported(self, path: Path, text: str) -> None:
+        clip = self._clips.get(path)
+        if clip is not None and clip.state == CLEANING and not clip.item.data(SHARE):
+            self._set_status(clip, f"{text}...", 0.0)
+            self._refresh()
+
+    def _live_picture(self, path: Path, before: bytes, after: bytes, n: int, total: int) -> None:
+        clip = self._clips.get(path)
+        if clip is None or clip.state != CLEANING:
+            return  # a late picture of a clip that has ended
+        self._live[path] = (before, after, n, total)
+        self._show_live()
+
+    def _show_live(self) -> None:
+        """The selected clip's latest live picture, if it is the one being cleaned."""
+        clip = self._selected()
+        live = self._live.get(clip.path) if clip is not None else None
+        on = clip is not None and clip.state == CLEANING and live is not None
+        self._live_row.setVisible(on)
+        if not on or clip is None or live is None or self._playing:
+            self._update_heading()
+            return
+        before, after, n, total = live
+        self._frame_wipe.show_pair(pixmap_from_png(before), pixmap_from_png(after), "")
+        self._stage.setCurrentWidget(self._frame_wipe)
+        of = f" of {total:,}" if total else ""
+        at = clock(n / clip.fps) if clip.fps > 0 else ""
+        self._live_caption.setText(
+            f"Frame {n:,}{of}" + (f"  ·  {at} into the cleaned clip" if at else "")
+        )
+        self._update_heading()
+
+    def _update_heading(self) -> None:
+        clip = self._selected()
+        if not self._live_row.isHidden():
+            self._preview_heading.setText(LIVE_HEADING)
+        elif self._runner.busy and clip is not None:
+            self._preview_heading.setText(BUSY_HEADING)
+        else:
+            self._preview_heading.setText(PAUSED_HEADING)
 
     def _show_still(self, seconds: float) -> None:
         clip = self._selected()
@@ -726,6 +784,8 @@ class MainWindow(QMainWindow):
         return Request(clip.path, self._timeline.playhead, self._panel.params(), self._learned())
 
     def _request_frame(self) -> None:
+        if self._runner.busy:
+            return  # the GPU is cleaning; the plain frame shows meanwhile
         req = self._preview_request()
         if req is not None:
             self._previewer.request(req)
@@ -734,6 +794,8 @@ class MainWindow(QMainWindow):
         clip = self._selected()
         if clip is None or clip.path != shown.request.path or self._playing:
             return
+        if self._runner.busy:
+            return  # asked for before Clean: the live view or the plain frame stays
         self._last_shown = shown
         self._frame_wipe.show_pair(
             QPixmap.fromImage(shown.before), QPixmap.fromImage(shown.after), ""
@@ -750,8 +812,8 @@ class MainWindow(QMainWindow):
         clip = self._selected()
         if clip is not None and clip.path == still.path and not self._playing:
             self._screen.show_image(pixmap_from_png(still.png) if still.png else None)
-            if self._last_shown is None:  # no preview for this clip yet: the frame meanwhile
-                self._stage.setCurrentWidget(self._screen)
+            if self._last_shown is None and self._live_row.isHidden():
+                self._stage.setCurrentWidget(self._screen)  # no preview yet: the frame
 
     def _seek(self, seconds: float) -> None:
         if self._playing:
@@ -871,16 +933,28 @@ class MainWindow(QMainWindow):
             clip.item.setToolTip("")
             self._set_status(clip, "Queued")
         self._began = time.monotonic()
-        selected = self._selected()
-        if selected is not None:
-            self._load_clip(selected)  # its cuts are locked now
-        self._next()
+        self._next()  # the GPU is busy from here: no preview is asked for below
+        if self._current is not None:
+            self._select(self._current)  # pressing Clean is asking to watch it
+        else:
+            selected = self._selected()
+            if selected is not None:
+                self._load_clip(selected)
 
     def _ordered(self) -> list[Clip]:
         rows = (self._list.item(i) for i in range(self._list.count()))
         return [self._clips[Path(str(item.data(PATH)))] for item in rows]
 
+    def _select(self, clip: Clip) -> None:
+        if self._selected() is clip:
+            self._load_clip(clip)  # its cuts are locked now
+        else:
+            flags = QItemSelectionModel.SelectionFlag.ClearAndSelect
+            self._list.setCurrentItem(clip.item, flags)  # loads it
+
     def _next(self) -> None:
+        ended = self._current
+        self._left = None
         clip = next((c for c in self._ordered() if c.state == QUEUED), None)
         if clip is None:
             self._current = None
@@ -906,6 +980,8 @@ class MainWindow(QMainWindow):
             self._learned(),
             clip.params.to_dict(),
         )
+        if ended is not None and self._selected() is ended:
+            self._select(clip)  # the user was watching: follow the batch
         self._refresh()
 
     def _progress(self, path: Path, done: int, total: int, when: float) -> None:
@@ -916,6 +992,7 @@ class MainWindow(QMainWindow):
         fps, left = eta.update(done, total, when)
         share = min(done / total, 1.0) if total else 0.0
         speed = f"{fps:.1f} fps" if fps else ""
+        self._left = (left, fps, time.monotonic()) if left is not None else None
         when_done = f"{clock(left)} left" if left is not None else "Estimating..."
         text = f"{share:.0%}   {speed}   {when_done}" if total else f"{done} frames   {speed}"
         self._set_status(clip, text, share)
@@ -931,7 +1008,10 @@ class MainWindow(QMainWindow):
             self._set_status(clip, f"Done   {clock(took)}   {frames / max(took, 1e-6):.1f} fps")
             clip.item.setToolTip(notes)
             self._reader.set_crop(path, Crop(*crop))
+        self._live.pop(path, None)
         self._next()
+        if clip is not None and self._selected() is clip:
+            self._load_clip(clip)
 
     def _failed(self, path: Path, message: str) -> None:
         clip = self._clips.get(path)
@@ -939,9 +1019,10 @@ class MainWindow(QMainWindow):
             clip.state = FAILED
             self._set_status(clip, "Failed  (hover for why)", problem=True)
             clip.item.setToolTip(message)
-            if self._selected() is clip:
-                self._load_clip(clip)  # its cuts can be changed again
+        self._live.pop(path, None)
         self._next()
+        if clip is not None and self._selected() is clip:
+            self._load_clip(clip)  # its cuts can be changed again; a preview once idle
 
     def _stop_all(self) -> None:
         self._runner.stop()
@@ -951,6 +1032,8 @@ class MainWindow(QMainWindow):
                 self._set_status(clip, "Stopped" if clip is self._current else "")
         self._current = None
         self._batch = []
+        self._live.clear()
+        self._left = None
         selected = self._selected()
         if selected is not None:
             self._load_clip(selected)
@@ -1138,6 +1221,9 @@ class MainWindow(QMainWindow):
             share = sum(parts) / len(parts)
             index = next((i for i, c in enumerate(self._batch) if c.state == CLEANING), 0)
             text = f"Cleaning {index + 1} of {len(self._batch)}   {share:.0%}"
+            finish = self._finish_time()
+            if finish:
+                text += f"   done about {finish}"
             self._overall.setValue(round(share * 1000))
             self._overall.setVisible(True)
             self._header_status.setText(text)
@@ -1149,7 +1235,27 @@ class MainWindow(QMainWindow):
                 f"{done} of {len(self._clips)} cleaned" if self._clips else ""
             )
             self._tray.setToolTip("AnaHD")
+            self._live_row.setVisible(False)  # nothing is being cleaned
+        self._update_heading()
         self._list.viewport().update()
+
+    def _finish_time(self) -> str:
+        """When the batch should be done, once the running clip's time left has settled:
+        that, plus each queued clip's kept length at the speed measured on this machine
+        (the estimate's speed times estimated / measured is the measured speed), plus its
+        start-up. Empty while estimating."""
+        if self._left is None:
+            return ""
+        left, fps, at = self._left
+        if fps <= 0:
+            return ""
+        seconds = max(left - (time.monotonic() - at), 0.0)
+        for c in self._batch:
+            if c.state == QUEUED and c.duration > 0:
+                frames = kept_seconds(c.cuts, c.duration) * (c.fps or 60.0)
+                seconds += frames / fps + START_S
+        done = QTime.currentTime().addSecs(round(seconds))
+        return QLocale().toString(done, QLocale.FormatType.ShortFormat)
 
     def _selected_clips(self) -> list[Clip]:
         return [
