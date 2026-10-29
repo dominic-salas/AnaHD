@@ -23,7 +23,7 @@ def _glyphs(frame: np.ndarray) -> np.ndarray:
     out = np.clip(frame, 0, 255).astype(np.uint8)
     for colour, thick in ((10, 5), (235, 2)):
         cv2.putText(out, TEXT, (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, colour, thick)
-    return out
+    return np.asarray(out)
 
 
 def _strokes() -> np.ndarray:

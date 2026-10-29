@@ -27,8 +27,7 @@ def _stub(h: int, w: int) -> Cleaner:
     c.h, c.w = h, w
     c.osd = torch.zeros(h, w, dtype=torch.bool, device=DEV)
     c.osd[:8, :16] = True
-    c.osd_half = c.osd[::2, ::2].clone()
-    c.alpha, c.alpha_half = c.osd.float(), c.osd_half.float()
+    c.alpha, c.alpha_half = c.osd.float(), c.osd[::2, ::2].float()
     c.shown, c.shown_half = c.alpha, c.alpha_half
     c._near_cache = {}
     c.params = RemasterParams()  # the clean-up sliders at their defaults
@@ -71,11 +70,12 @@ def test_untrained_restorer_returns_the_centre(tmp_path: Path) -> None:
     centre = Prepared(cy, cu, cv, None, cy)  # type: ignore[arg-type, unused-ignore]
     with torch.inference_mode():
         y, u, v = c._learned(net, centre, a)
-    keep, keep_h = ~c.osd, ~c.osd_half
+    osd_half = c.alpha_half > 0
+    keep, keep_h = ~c.osd, ~osd_half
     # FP16 inside the network: about 0.1 level of rounding on 0..255.
     assert (y - cy)[keep].abs().max() < 0.2
     assert torch.equal(y[c.osd], cy[c.osd])
     assert (u - cu)[keep_h].abs().max() < 0.5
     assert (v - cv)[keep_h].abs().max() < 0.5
-    assert torch.equal(u[c.osd_half], cu[c.osd_half])
-    assert torch.equal(v[c.osd_half], cv[c.osd_half])
+    assert torch.equal(u[osd_half], cu[osd_half])
+    assert torch.equal(v[osd_half], cv[osd_half])
