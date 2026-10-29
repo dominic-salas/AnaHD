@@ -20,6 +20,31 @@
 
 ## App
 
+### `--cut` error names an internal function (QA 2026-10-29, low)
+
+**What:** `anahd clip.mp4 --cut abc` prints `argument --cut: invalid parse_cut value: 'abc'`.
+
+**Why:** It should say what is expected: "START-END in seconds or m:ss, e.g. 0-4.5 or 2:10-2:31".
+
+**Context:** argparse shows a type function's `__name__`. Raise `argparse.ArgumentTypeError` with the text above in `anahd.cuts.parse_cut`, or wrap it. Found by /qa (probe 004). Repro: the command above; it should still exit 2.
+
+**Effort:** S → S
+**Priority:** P3
+**Depends on:** none
+
+### Live caption total counts packets, not frames (QA 2026-10-29, low)
+
+**What:** With cuts, the live caption reads "Frame N of 301" when the export writes 300 decodable frames.
+
+**Why:** `cli.render`'s `expected` is the kept span of the *packet* count; one packet does not decode. Progress % has always used the same number, so it is off by a frame at most.
+
+**Context:** Found by /qa (probe 010) on night6.mp4 with `--cut 2-3 --parts`: 361 packets, parts of 120 + 180 frames. Cosmetic. Fix only if the count can come from the decoder for free.
+
+**Effort:** S → S
+**Priority:** P4
+**Depends on:** none
+
+
 ### Play the cleaned output while it renders
 
 **What:** Write the `.partial.mp4` as fragmented MP4 so the Results player can play the cleaned flight up to wherever the render has reached.
