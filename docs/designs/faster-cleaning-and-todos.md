@@ -289,3 +289,37 @@ Unresolved: none. Pass 5 stays at 7 for want of a DESIGN.md (pre-existing, not t
 - **VERDICT:** CEO + ENG + DX CLEARED, design 7/10 with no blocking gap — ready to implement (Wave 1 spike first).
 
 NO UNRESOLVED DECISIONS
+
+## Outcome (built 2026-10-29, branch feat/faster-0.1.3)
+
+- **Wave 1:** the spike found the align stacks at ~0.2 ms (1a dropped, under its 1 ms bar)
+  and the repair graphs' input copies at 1.09 ms plus ~0.4 ms of output clones. Shipped: the
+  fix graph reads the detect graph's own buffers and outputs, only the centre planes are
+  copied out, and `_norm_grid` writes in place. framemd5 identical (Learned x3 each side,
+  Classic x1), `hdz_30s.mp4` median 93.3 -> 91.2 s (+2.3%).
+- **Wave 3, two masks:** `detect_osd` is now the OSD's strokes (any sample) and outline
+  (4 px: 3 px covered 95% of the synthetic OSD, 4 px 98.6%), with no box. It drives only
+  what is seen: a soft alpha (1 on the mask, 0 four px out) for the U-Net blend, destripe,
+  derainbow, the Classic fusion's own exclusion and the remaster stage. The alpha is also
+  gated per frame: an element keeps the plain frame only while a stroke of it shows within
+  24 px somewhere in the cleaning window (without that, `hdz_30s.mp4`'s flight timer left
+  "000"-shaped patches on the propeller guard during the menu; with the gate only on the
+  centre frame, a damaged frame lost its readout). The old mask is kept unchanged as
+  `detect_osd_regions` for everything never shown: breakup detection and its `valid` map,
+  every repair step, the flow fill, the levels and the redraw's layout. With the new mask
+  there, `dusk.mp4` frame 46 was repaired by rows instead of whole and lost its throttle
+  readout; with the split, repair matches 0.1.2 row for row.
+- **Gate (vs Wave 1's output): PASS, 19 of 19**, all 7 real clips; still pulsing
+  1.733 -> 1.498, worst tiles 9.94 -> 6.22, OSD box 0.298 -> 0.267, outage frames
+  18.728 -> 18.757. (An earlier version missed outage frames by 0.005 dB; the owner accepted
+  that miss, "Ship it (recommended)", 2026-10-29, but the final version passes.)
+- **Speed:** the per-frame OSD check first cost 22% (57x57 and 85x85 max-pools per frame),
+  fixed with separable dilation (`ops.dilate`, identical result) and by the stage reusing
+  the cleaner's alpha; it still costs ~1.6%. 0.1.3 vs 0.1.2: +0.4 to +0.7% (median of 3,
+  `hdz_30s.mp4`). The 20% goal is now Wave 2's (TODOS.md).
+- **Proof not done as planned:** no hand-labelled frame-0 mask (frame 0 is a menu, and the
+  label needs a person). Coverage was measured instead: 98.6% of the synthetic OSD's true
+  pixels, 99.5% of `hdz_30s.mp4`'s per-frame strokes. The owner's named eye-check clip is
+  still open; `hdz_30s.mp4`, `dusk.mp4`, `night_street.mp4`, `playground.mp4` and
+  `sunny.mp4` were eye-checked.
+- **TODO items 11, 13, 14** shipped; 12 and 15 closed; 16 deferred. Wave 2 not built.

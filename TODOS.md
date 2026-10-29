@@ -2,21 +2,15 @@
 
 ## Cleaning
 
-### Rectangular boxes in still scenes (found 2026-10-28)
+### Wave 2 speed levers (LK box filter, fp16 warp/blend)
 
-**What:** Faint lighter or darker rectangles in the cleaned output where the scene doesn't move: on the propeller guard and around the holes in the desk in `hdz_30s.mp4` (drone sitting on a desk, DVR menu showing). See `docs/designs/evidence/osd-boxes-hdz30s.png`: output frames 0 and 26, at 2x.
+**What:** Levers 8 and 9 of docs/designs/faster-cleaning-and-todos.md, each through the gate.
 
-**Why:** This is the kind of artifact the owner has caught before ("noticable boxes behind OSD elements"). It is present in 0.1.1 and in 0.1.2 alike: 0.1.2's output is bit-identical. Likely cause, not yet verified: in a scene that barely moves, still detail is taken for OSD (README, "OSD protection"). OSD pixels keep the current noisy frame, while the area around them is fused from the neighbours, so the edge of the mask's boxes shows.
-
-**Pros:** It would remove a visible flaw from every still moment: menus, landing, waiting on the pad.
-
-**Cons:** Changes the output, so it needs the relative gate and an eye check; the OSD mask is shared with OSD protection and the redraw.
-
-**Context:** Start in `anahd.picture.detect_osd` (how the mask is made) and in the GPU pipeline's OSD protection (where OSD pixels keep the current frame). Check whether the boxes match the mask's tiles. A fix might feather the mask edge, or require the OSD to be bright, edged detail rather than anything that stays still.
+**Why:** 0.1.3 shipped Wave 1 (+2.3%, identical output) and the box fix, which costs about 1.6% back (the per-frame check of which OSD elements show): 0.1.3 is about as fast as 0.1.2. The 20% goal needs these.
 
 **Effort:** M (human) → S (CC+gstack)
-**Priority:** P1
-**Depends on:** none
+**Priority:** P2
+**Depends on:** 0.1.3
 
 ## App
 
@@ -59,3 +53,4 @@
 - **Card thumbnail shows the cleaned frame when done**: Done 2026-10-29 (0.1.3): the card shows the last live "after" picture; without one, or when stopped or failed, it keeps the recording's.
 - **Live caption total counts packets, not frames**: Closed, won't do (2026-10-29): off by one frame at most; the decoded count would cost an extra probe.
 - **5-second motion check before committing**: Closed, won't do (2026-10-29): the live view shows motion a minute in, with Stop under it.
+- **Rectangular boxes in still scenes**: Fixed 2026-10-29 (0.1.3): the OSD mask is the OSD's own strokes, the switch to the cleaned picture is feathered, and an element keeps the plain frame only while it shows. Evidence: docs/designs/evidence/osd-boxes-fixed-hdz30s.jpg.
