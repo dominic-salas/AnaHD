@@ -5,7 +5,8 @@ The worker puts tuples on a queue. Ongoing (any number, only the newest of each 
 matters): ``("stage", text)`` (what it is doing before the first frame),
 ``("progress", done, total, fps, time)`` and ``("frame", before_jpg, after_jpg, n, total)``
 (a live before/after picture of output frame ``n``). Then exactly one ending:
-``("done", frames, seconds, (x, y, w, h), notes)`` or ``("failed", message)``.
+``("done", frames, seconds, (x, y, w, h), notes, gpu)`` (gpu: the graphics card's name, or
+"") or ``("failed", message)``.
 """
 
 from __future__ import annotations
@@ -78,11 +79,21 @@ def work(
                 lambda before, after, n, total: messages.put(("frame", before, after, n, total)),
             )
         c = result.crop
-        messages.put(("done", result.frames, took, (c.x, c.y, c.width, c.height), result.notes))
+        crop = (c.x, c.y, c.width, c.height)
+        messages.put(("done", result.frames, took, crop, result.notes, _gpu_name()))
     except AnaHDError as exc:
         messages.put(("failed", str(exc)))
     except BaseException as exc:
         messages.put(("failed", f"{type(exc).__name__}: {exc}"))
+
+
+def _gpu_name() -> str:
+    try:
+        import torch
+
+        return str(torch.cuda.get_device_name()) if torch.cuda.is_available() else ""
+    except Exception:  # the name only labels a speed measurement
+        return ""
 
 
 class Runner(QObject):
@@ -91,7 +102,7 @@ class Runner(QObject):
     progress = Signal(object, int, int, float)  # source, frames done, total (0 = unknown), time
     stage = Signal(object, str)  # source, what it is doing before the first frame
     frame = Signal(object, bytes, bytes, int, int)  # source, before, after (JPEG), n, total
-    finished = Signal(object, object)  # source, done tuple (frames, seconds, crop, notes)
+    finished = Signal(object, object)  # source, done tuple (frames, seconds, crop, notes, gpu)
     failed = Signal(object, str)  # source, message
 
     def __init__(self, parent: QObject | None = None) -> None:

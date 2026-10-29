@@ -46,3 +46,15 @@ def test_output_time_maps_back_to_the_recording() -> None:
     assert output_to_source(89 / fps, spans, fps) == pytest.approx(119 / fps)
     assert output_to_source(90 / fps, spans, fps) == pytest.approx(150 / fps)  # across the cut
     assert output_to_source(10.0, spans, fps) == pytest.approx(284 / fps)  # past the end
+
+
+@pytest.mark.parametrize("bad", ["abc", "5-2", "1-2-3"])
+def test_a_bad_cut_on_the_command_line_names_the_format(
+    bad: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from anahd import cli
+
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["in.mp4", "--cut", bad])
+    err = capsys.readouterr().err
+    assert "START-END in seconds or m:ss, e.g. 0-4.5 or 1:05-1:20" in err, err

@@ -980,3 +980,68 @@ def test_finish_time_uses_the_speed_measured_here(
     assert abs(seen[-1] - (100 + 15 + win_mod.START_S)) <= 1
     window._left = None  # a retry: its time left is settling again
     assert window._finish_time() == ""
+
+
+def test_a_cleaned_clip_shows_its_last_live_picture_others_keep_theirs(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from anahd.app.cliplist import THUMB
+
+    monkeypatch.setattr(window._runner, "start", lambda src, *a: None)
+    monkeypatch.setattr(window._previewer, "request", lambda req: None)
+    a, b, c, d = (_clip(window, tmp_path, f"{n}.mp4") for n in "abcd")
+    _busy(monkeypatch, window)
+    window._start_all()
+    window._live_picture(a.path, _jpeg(10), _jpeg(200), 5, 600)
+    window._finished(a.path, (600, 10.0, (0, 0, 960, 720), ""))
+    shown = a.item.data(THUMB).toImage()
+    assert abs(shown.pixelColor(shown.width() // 2, shown.height() // 2).red() - 200) <= 6
+    window._finished(b.path, (600, 10.0, (0, 0, 960, 720), ""))  # done, no live picture
+    assert b.item.data(THUMB) is None
+    window._live_picture(c.path, _jpeg(10), _jpeg(200), 5, 600)
+    window._failed(c.path, "boom")
+    assert c.item.data(THUMB) is None
+    window._live_picture(d.path, _jpeg(10), _jpeg(200), 5, 600)
+    window._stop_all()
+    assert d.item.data(THUMB) is None
+
+
+def test_the_speed_estimate_learns_this_pc_from_long_completed_runs(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from anahd.app.speed import START_S, estimate, frame_ms
+
+    monkeypatch.setattr(window._runner, "start", lambda src, *a: None)
+    monkeypatch.setattr(window._previewer, "request", lambda req: None)
+    clips = [_clip(window, tmp_path, f"{n}.mp4") for n in "abcde"]
+    _busy(monkeypatch, window)
+    window._start_all()
+    params, learned = clips[0].params, clips[0].learned
+    assert params is not None
+    base = estimate(params, learned)[0]
+    assert "RTX 4070 Ti" in window._panel.speed.text()
+
+    def run(clip: Clip, frames: int, speed: float, gpu: str = "RTX 3060") -> None:
+        """A completed run at ``speed`` times the estimate's steady speed."""
+        seconds = START_S + frames * frame_ms(params, learned) / 1000 / speed
+        window._finished(clip.path, (frames, seconds, (0, 0, 960, 720), "", gpu))
+
+    run(clips[0], 599, 0.5)  # too short to tell
+    assert window._speed_ratio(learned) is None
+    run(clips[1], 3000, 0.5)
+    assert window._speed_ratio(learned) == pytest.approx(0.5)
+    assert "this PC's RTX 3060" in window._panel.speed.text()
+    assert f"about {estimate(params, learned, 0.5)[0]:.0f} fps" in window._panel.speed.text()
+    run(clips[2], 3000, 1.5)  # half the old ratio, half the new
+    assert window._speed_ratio(learned) == pytest.approx(1.0)
+    run(clips[3], 3000, 9.0)  # kept within 0.5-2
+    assert window._speed_ratio(learned) == pytest.approx(2.0)
+    window._failed(clips[4].path, "boom")  # a failure teaches nothing
+    assert window._speed_ratio(learned) == pytest.approx(2.0)
+    assert window._speed_ratio(not learned) is None  # the other engine is measured apart
+    _busy(monkeypatch, window, False)
+    window._refresh()
+    assert window._panel.reset_button.isEnabled()
+    window._panel.reset_button.click()
+    assert window._speed_ratio(learned) is None
+    assert f"about {base:.0f} fps" in window._panel.speed.text()
