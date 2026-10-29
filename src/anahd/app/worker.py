@@ -176,12 +176,20 @@ class Runner(QObject):
             else:
                 self.failed.emit(src, str(msg[1]))
             return
+        # A slot may stop this clip (or start the next) while handling a signal: from then on
+        # this poll's process is not ours to report on.
         if (m := newest.get("stage")) is not None:
             self.stage.emit(src, str(m[1]))
+            if self._proc is not proc:
+                return
         if (m := newest.get("progress")) is not None:
             self.progress.emit(src, int(m[1]), int(m[2] or 0), float(m[4]))
+            if self._proc is not proc:
+                return
         if (m := newest.get("frame")) is not None:
             self.frame.emit(src, bytes(m[1]), bytes(m[2]), int(m[3]), int(m[4]))
+            if self._proc is not proc:
+                return
         if not proc.is_alive():
             # Its last message may still be in the pipe: wait for it briefly.
             try:
