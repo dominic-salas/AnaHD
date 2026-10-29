@@ -212,9 +212,11 @@ def _analyze(
     dev = device or torch.device("cuda")
     info = probe(path)
     meas = measured or measure(path, info, Options())
-    if not meas.osd.any():
+    # Where the OSD's cells may be: each element's whole box (not only its strokes).
+    regions = meas.osd if meas.osd_regions is None else meas.osd_regions
+    if not regions.any():
         return None
-    mask = torch.from_numpy(meas.osd).to(dev)
+    mask = torch.from_numpy(regions).to(dev)
     window = min(WINDOW, info.duration)
     every = min(EVERY, window / 20)  # a short clip is sampled more densely
     start = max(0.0, info.duration / 2 - window / 2)

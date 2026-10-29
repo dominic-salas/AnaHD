@@ -20,7 +20,7 @@ from anahd.clean import CleanConfig
 from anahd.errors import MediaError
 from anahd.look import LookConfig
 from anahd.media import Crop, Encoder, Frame, VideoInfo, count_frames, probe, read_frames
-from anahd.picture import detect_crop, detect_osd, output_size
+from anahd.picture import detect_crop, detect_osd, detect_osd_regions, output_size
 from anahd.remaster.params import RemasterParams
 from anahd.steady import SteadyConfig
 
@@ -77,6 +77,7 @@ class Measured:
     curve: np.ndarray  # tone lookup
     size: tuple[int, int]  # output width, height
     samples: list[np.ndarray]  # cropped luma samples
+    osd_regions: np.ndarray | None = None  # bool: where overlays may be (detect_osd_regions)
 
 
 def _samples(src: Path, info: VideoInfo, opts: Options) -> list[np.ndarray]:
@@ -109,10 +110,11 @@ def measure(src: Path, info: VideoInfo, opts: Options) -> Measured:
         cropped = [cv2.resize(s, size, interpolation=cv2.INTER_AREA) for s in cropped]
         crop = small
     osd = detect_osd(cropped)
-    levels = look.measure_levels(cropped, osd, opts.look)
+    regions = detect_osd_regions(cropped)
+    levels = look.measure_levels(cropped, regions, opts.look)
     curve = look.tone_curve(levels, opts.look)
     size = output_size(crop, sar=info.sar, frame=(info.width, info.height))
-    return Measured(crop, osd, curve, size, cropped)
+    return Measured(crop, osd, curve, size, cropped, regions)
 
 
 def enhance(

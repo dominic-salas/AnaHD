@@ -1,9 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-10-29)
 
-- Frames go to the GPU from pinned memory without a blocking copy: about 1% faster, and
-  the output is the same, bit for bit.
+- **No more boxes around the OSD.** In still moments (on the pad, in menus, landing) faint
+  lighter or darker rectangles showed around the OSD and on still parts of the scene that
+  were taken for OSD. The OSD is now found by its own strokes, the cleaned picture fades in
+  around it over a few pixels instead of at a hard edge, and an OSD element keeps the plain
+  frame only while it is on screen, so a menu or a flight timer leaves nothing behind once
+  it is gone. Still scenes also pulse less.
+- Fewer copies on the GPU and frames sent from pinned memory: about 3% faster with the
+  same output, which the box fix spends again; 0.1.3 cleans as fast as 0.1.2.
+- The speed estimate under the settings learns your own PC's speed from finished cleans
+  (600 frames or more), per graphics card, app version and engine; Reset to defaults
+  forgets it.
+- A cleaned clip's card shows the cleaned picture.
+- A wrong `--cut` says what is expected: START-END in seconds or m:ss, e.g. 0-4.5 or
+  1:05-1:20.
 
 ## 0.1.2 (2026-10-28)
 

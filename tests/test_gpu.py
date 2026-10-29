@@ -14,6 +14,7 @@ torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():  # pragma: no cover - depends on the machine
     pytest.skip("no CUDA GPU", allow_module_level=True)
 
+import torch.nn.functional as F  # noqa: E402
 from torch import Tensor  # noqa: E402
 
 from anahd.gpu import ops  # noqa: E402
@@ -63,10 +64,12 @@ def test_destripe_and_derainbow_match_cpu() -> None:
     c.cfg = cfg
     c.osd = _t(osd).bool()
     c.keep = (~c.osd).float()
-    c.osd_half = _t(cv2.resize(osd.astype(np.uint8), (48, 36), interpolation=0)).bool()
+    osd_half = _t(cv2.resize(osd.astype(np.uint8), (48, 36), interpolation=0)).bool()
+    c.alpha = c.shown = c.osd.float()  # a hard switch, as the CPU path makes
+    c.shown_half = osd_half.float()
     assert np.abs(_n(c.destripe(_t(y))) - clean.destripe(y, osd, cfg)).max() < 1e-2
     gu, gv = c.derainbow(_t(y), _t(u), _t(v))
-    ru, rv = clean.derainbow(y, u, v, _n(c.osd_half).astype(bool), cfg)
+    ru, rv = clean.derainbow(y, u, v, _n(osd_half).astype(bool), cfg)
     assert np.abs(_n(gu) - ru).max() < 1e-2
     assert np.abs(_n(gv) - rv).max() < 1e-2
 
@@ -101,3 +104,10 @@ def test_median3_matches_opencv() -> None:
     x = np.asarray(RNG.uniform(0, 255, (40, 50)).round(), dtype=np.float32)
     ref = cv2.medianBlur(x, 3)  # float input: edge pixels repeated
     assert np.abs(_n(ops.median3(_t(x))) - ref).max() < 1e-3
+
+
+def test_dilate_is_a_square_max_in_two_passes() -> None:
+    x = _t((_img() > 200).astype(np.float32))
+    for r in (1, 4, 28):
+        square = F.max_pool2d(x[None, None], 2 * r + 1, 1, r)[0, 0]
+        assert torch.equal(ops.dilate(x, r), square), r

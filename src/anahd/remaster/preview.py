@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from numpy.typing import NDArray
 
 from anahd.media import VideoInfo, probe, read_frames, read_raw
+from anahd.picture import osd_alpha
 from anahd.pipeline import Measured, Options, _full_range, _windows, measure
 
 from .grade import to_rgb
@@ -92,7 +93,7 @@ def _clip(cache: PreviewCache, path: Path, learned: bool) -> _Clip:
         gcfg = GpuConfig(repair=True, learned=weights.resolve(None) if learned else None)
         cleaner = Cleaner(
             meas.crop, meas.osd, meas.curve, meas.size, info,
-            Options().clean, Options().look, gcfg, cuda_device(),
+            Options().clean, Options().look, gcfg, cuda_device(), regions=meas.osd_regions,
         )  # fmt: skip
         cache.clips[key] = _Clip(info, meas, cleaner, fps, cleaner.detector)
     return cache.clips[key]
@@ -120,7 +121,8 @@ def _moment(c: _Clip, path: Path, n: int, p: RemasterParams) -> _Moment:
         if first + i not in want:
             continue
         y, u, v = cleaner.clean_planes(centre, nbs)  # type: ignore[attr-defined]
-        frames.append(Frame(y, u, v, cleaner.flows_at((w // 2, h // 2))))  # type: ignore[attr-defined]
+        flows = cleaner.flows_at((w // 2, h // 2))  # type: ignore[attr-defined]
+        frames.append(Frame(y, u, v, flows, osd=cleaner.shown))  # type: ignore[attr-defined]
     y0, u0, v0 = cleaner.upload(raws[n - first])  # type: ignore[attr-defined]
     big = cleaner.to_709(*_plain(y0, u0, v0, (w, h)))  # type: ignore[attr-defined]
     uf = F.interpolate(torch.stack(big[1:])[None], size=(h, w), mode="bilinear")[0]
@@ -192,7 +194,7 @@ def preview_frame(
         warp = _steady(c, clip, m, p.stabilisation / 100) if p.stabilisation > 0 else None
         t3 = time.perf_counter()
         ms["steady"] = 1000 * (t3 - t2)
-        osd = torch.from_numpy(c.meas.osd).to("cuda")
+        osd = torch.from_numpy(osd_alpha(c.meas.osd)).to("cuda")
         redraw = _redraw(cache, c, p, clip, m.first) if p.osd_redraw else None
         stage = Remaster(c.meas.size, osd, p, torch.device("cuda"), steady=warp, redraw=redraw)
         stage.capture = m.centre
@@ -223,7 +225,7 @@ def _redraw(
         layout = analyze_clip(
             clip, p.osd_font_path or None, cli=p.osd_cli_path or None, measured=c.meas
         )
-        osd = torch.from_numpy(c.meas.osd).to("cuda")
+        osd = torch.from_numpy(osd_alpha(c.meas.osd)).to("cuda")
         cache.redraws[key] = (
             None
             if layout is None

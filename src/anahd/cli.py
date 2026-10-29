@@ -70,6 +70,16 @@ def keep_awake() -> Iterator[None]:
         kernel.SetThreadExecutionState(es_continuous)
 
 
+def _cut_arg(text: str) -> tuple[float, float]:
+    """``--cut``'s value; a bad one names the format (argparse would only say "invalid")."""
+    try:
+        return parse_cut(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{exc}; a cut is START-END in seconds or m:ss, e.g. 0-4.5 or 1:05-1:20"
+        ) from exc
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="anahd", description=__doc__)
     p.add_argument("--version", action="version", version=f"AnaHD {__version__}")
@@ -81,7 +91,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--duration", type=float, help="seconds to process")
     p.add_argument(
         "--cut",
-        type=parse_cut,
+        type=_cut_arg,
         action="append",
         metavar="START-END",
         help="leave this stretch out (seconds or m:ss, e.g. 0-4.5 or 2:10-2:31); repeatable",
