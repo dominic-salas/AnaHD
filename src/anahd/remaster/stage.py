@@ -55,6 +55,7 @@ class Frame:
     index: int = 0
     mean: Tensor | None = None  # mean colour after the temporal clean-up
     strokes: Tensor | None = None  # (H, W) 1 within reach of an OSD stroke shown in it
+    osd: Tensor | None = None  # source-size OSD alpha where the OSD shows (Cleaner.shown)
 
 
 @dataclass
@@ -130,7 +131,8 @@ class Remaster:
     def push(self, f: Frame) -> list[Tensor]:
         """Add the next cleaned frame; returns the frames that are now finished (packed)."""
         f.index = self.count
-        f.strokes = self._strokes(f.y)
+        if f.osd is None:
+            f.strokes = self._strokes(f.y)
         self.count += 1
         self.win.append(f)
         out = []
@@ -191,13 +193,18 @@ class Remaster:
         darkest = -F.max_pool2d(-y[None, None], 5, 1, 2)[0, 0]
         strokes = (y >= glyph.glyph_level / 255) & (darkest < y - glyph.glyph_outline / 255)
         reach = max(1, round((OSD_SHOWN_REACH + OSD_FEATHER) * self.osd_scale))
-        return F.max_pool2d(strokes.half()[None, None], 2 * reach + 1, 1, reach)[0, 0]
+        return ops.dilate(strokes.half(), reach)
 
     def _shown(self, win: list[Frame], c: int) -> Tensor:
         """The OSD area where the OSD shows around frame ``c`` (a stroke in it or its
         neighbours): the area covers every element ever shown, and a still, colourful
         object under one that is not shown now (a propeller guard under the flight timer
-        during a menu) is the picture, graded like the rest."""
+        during a menu) is the picture, graded like the rest. The cleaner's own judgement,
+        when the frame carries it."""
+        given = win[c].osd
+        if given is not None:
+            shown = given.float()[None, None]
+            return F.interpolate(shown, size=(self.h, self.w), mode="bilinear")[0, 0]
         near = torch.stack(
             [
                 self._strokes(f.y) if f.strokes is None else f.strokes

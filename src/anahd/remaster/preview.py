@@ -121,7 +121,8 @@ def _moment(c: _Clip, path: Path, n: int, p: RemasterParams) -> _Moment:
         if first + i not in want:
             continue
         y, u, v = cleaner.clean_planes(centre, nbs)  # type: ignore[attr-defined]
-        frames.append(Frame(y, u, v, cleaner.flows_at((w // 2, h // 2))))  # type: ignore[attr-defined]
+        flows = cleaner.flows_at((w // 2, h // 2))  # type: ignore[attr-defined]
+        frames.append(Frame(y, u, v, flows, osd=cleaner.shown))  # type: ignore[attr-defined]
     y0, u0, v0 = cleaner.upload(raws[n - first])  # type: ignore[attr-defined]
     big = cleaner.to_709(*_plain(y0, u0, v0, (w, h)))  # type: ignore[attr-defined]
     uf = F.interpolate(torch.stack(big[1:])[None], size=(h, w), mode="bilinear")[0]

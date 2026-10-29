@@ -344,8 +344,10 @@ class Cleaner:
         warped = F.grid_sample(
             ny[:, None], g, mode="bicubic", padding_mode="border", align_corners=True
         )[:, 0]
+        # Breakup repair judges the neighbours on the picture alone (as 0.1.2 did); fusion
+        # takes the OSD's own pixels out on its own (``blend``).
         valid = F.grid_sample(
-            self.keep.expand(len(offsets), 1, h, w),
+            self.judged.expand(len(offsets), 1, h, w),
             g,
             mode="bilinear",
             padding_mode="zeros",
@@ -378,7 +380,18 @@ class Cleaner:
         ref = ops.gaussian(cy, 1.2, size=(5, 5))
         diff = (a.blur - ref).abs()
         match = 1.0 / (1.0 + (diff / cfg.match_sigma) ** 4)
-        weight = match * a.valid * self.keep * a.dist
+        # The neighbours' own OSD pixels take no part, and nothing more: a wider region left
+        # out would leave a box of unfused noise around the OSD.
+        h, w = self.h, self.w
+        g = _norm_grid(self.grid[None] + a.flow, w, h)
+        picture = F.grid_sample(
+            self.keep.expand(len(a.offsets), 1, h, w),
+            g,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=True,
+        )[:, 0].clamp(0.0, 1.0)
+        weight = match * picture * self.keep * a.dist
         y = (cy + (weight * warped).sum(0)) / (1.0 + weight.sum(0))
 
         centre_u, centre_v = cu, cv
@@ -803,7 +816,7 @@ class Cleaner:
         darkest = -F.max_pool2d(-y[None, None], 5, 1, 2)[0, 0]
         strokes = (y >= self.glyph.glyph_level) & (darkest < y - self.glyph.glyph_outline)
         reach = OSD_SHOWN_REACH + OSD_FEATHER
-        return F.max_pool2d(strokes.half()[None, None], 2 * reach + 1, 1, reach)[0, 0]
+        return ops.dilate(strokes.half(), reach)
 
     def osd_shown(self, frames: list[Prepared]) -> tuple[Tensor, Tensor]:
         """The OSD alpha (full and chroma size) where the OSD shows in the window ``frames``
@@ -1189,7 +1202,8 @@ def enhance(
                     put(cleaner.clean(centre, nbs))
                 else:
                     y, u, v = cleaner.clean_planes(centre, nbs)
-                    for packed in stage.push(RFrame(y, u, v, cleaner.flows_at(half))):
+                    frame = RFrame(y, u, v, cleaner.flows_at(half), osd=cleaner.shown)
+                    for packed in stage.push(frame):
                         put(packed)
                 if progress is not None:
                     progress(done)
