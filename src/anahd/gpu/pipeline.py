@@ -43,6 +43,7 @@ from anahd.gpu.upscale import Upscaler, reduce
 from anahd.look import LookConfig
 from anahd.media import Crop, Encoder, VideoInfo, probe, read_raw
 from anahd.model.infer import LearnedRestorer
+from anahd.picture import OSD_FEATHER, OSD_SHOWN_REACH, PictureConfig, osd_alpha, osd_boxes
 from anahd.pipeline import Measured, Options, Result, _windows, measure
 from anahd.remaster.params import RemasterParams
 from anahd.remaster.stage import Frame as RFrame
@@ -116,6 +117,7 @@ class Prepared:
     enc: Encoded
     yb: Tensor  # luma lightly blurred, 0..1, for flow refinement
     noise: Tensor | None = None  # chroma noise (breakup.chroma_noise), when repairing
+    strokes: Tensor | None = None  # (H, W) 1 within reach of an OSD stroke shown in it
 
 
 def _ycc_matrix(kr: float, kb: float) -> np.ndarray:
@@ -152,7 +154,12 @@ class Cleaner:
         gcfg: GpuConfig,
         device: torch.device,
         params: RemasterParams | None = None,
+        regions: np.ndarray | None = None,
     ) -> None:
+        """``osd``: the OSD's own pixels (``picture.detect_osd``), kept uncleaned;
+        ``regions``: where overlays may be (``picture.detect_osd_regions``), left out when
+        judging the picture (breakup, motion) and taken whole in a repaired row; each OSD
+        element's box when not given."""
         self.dev = device
         self.gcfg = gcfg
         self.params = params or RemasterParams()
@@ -170,16 +177,24 @@ class Cleaner:
             return torch.from_numpy(np.ascontiguousarray(a)).to(device)
 
         self.osd = t(osd)
-        self.keep = (~self.osd).float()
-        self.keep_half = ops.area_half(self.keep)
+        # How much of each pixel keeps the plain centre frame: 1 on the OSD, fading to 0 just
+        # outside it, so no hard edge of untouched noise shows around it. A chroma sample is
+        # OSD wherever any of its four luma pixels is.
+        self.alpha = t(osd_alpha(osd))
+        self.glyph = PictureConfig()  # what an OSD stroke looks like
+        self.alpha_half = F.max_pool2d(self.alpha[None, None], 2)[0, 0]
+        self.keep = 1.0 - self.alpha
+        self.keep_half = 1.0 - self.alpha_half
+        # The same, only where the OSD shows in the frame being cleaned (set per frame).
+        self.shown, self.shown_half = self.alpha, self.alpha_half
         nearest = cv2.INTER_NEAREST
-        self.osd_half = t(
-            cv2.resize(osd.astype(np.uint8), (w // 2, h // 2), interpolation=nearest) > 0
-        )
         small = (round(w * clean.flow_scale), round(h * clean.flow_scale))
         self.small = small
+        # Motion is followed, and damage judged, on the picture alone: the overlay regions
+        # are filled in for the flow and left out of the breakup detector.
+        boxes = osd_boxes(osd) if regions is None else regions
         self.fill = ops.Filler(
-            t(cv2.resize(osd.astype(np.uint8), small, interpolation=nearest) > 0)
+            t(cv2.resize(boxes.astype(np.uint8), small, interpolation=nearest) > 0)
         )
         self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device)
         self.curve = t(curve.astype(np.float32))
@@ -207,7 +222,8 @@ class Cleaner:
             torch.from_numpy(np.linalg.inv(_ycc_matrix(0.2126, 0.0722))).float().to(device)
         )
         repair = gcfg.repair and self.params.static_repair > 0
-        self.detector = Detector(self.keep, gcfg.breakup) if repair else None
+        self.judged = (~t(boxes)).float()
+        self.detector = Detector(self.judged, gcfg.breakup) if repair else None
         self.learned: LearnedRestorer | None = None
         if gcfg.learned is not None:
             # Full strength here: the clean-up sliders mix it with the plain frame (_mix).
@@ -276,7 +292,8 @@ class Cleaner:
             ].round()
         small = self.fill(small)
         noise = None if self.detector is None else chroma_noise(u, v)  # once per frame
-        return Prepared(y, u, v, self.flow.encode(small), ops.gaussian(y, 1.0) / 255.0, noise)
+        yb = ops.gaussian(y, 1.0) / 255.0
+        return Prepared(y, u, v, self.flow.encode(small), yb, noise, self.osd_strokes(y))
 
     def align(self, centre: Prepared, neighbours: list[tuple[int, Prepared]]) -> Aligned:
         """Each neighbour warped onto the centre (``neighbours`` must not be empty)."""
@@ -675,14 +692,14 @@ class Cleaner:
         total = ops.row_box_sum(detail, cfg.stripe_window)
         count = ops.row_box_sum(self.keep, cfg.stripe_window)
         out = y - total / count.clamp_min(1.0)
-        return torch.where(self.osd, y, out)
+        return torch.lerp(out, y, self.shown)
 
     def derainbow(self, y: Tensor, u: Tensor, v: Tensor) -> tuple[Tensor, Tensor]:
         cfg = self.cfg
         yh = ops.area_half(y)
         texture = ops.gaussian((yh - ops.gaussian(yh, 1.0)).abs(), 2.0)
         cut = cfg.rainbow_cut * (texture / cfg.rainbow_texture).clamp(0.0, 1.0)
-        cut = torch.where(self.osd_half, torch.zeros_like(cut), cut)
+        cut = cut * (1.0 - self.shown_half)
         out = []
         for c in (u, v):
             low = ops.gaussian(c, 1.5)
@@ -765,6 +782,7 @@ class Cleaner:
             if self.detector is not None:
                 a = self._repair_some(centre, a)
         self.last_flow = None if a is None else (a.flow, list(a.offsets))
+        self.shown, self.shown_half = self.osd_shown([centre, *(p for _, p in neighbours)])
         if self.learned is not None:
             # The network replaces fusion, destripe and derainbow; only alignment (and repair)
             # are needed for it.
@@ -779,6 +797,26 @@ class Cleaner:
         n, sl = p.noise / 100, p.scan_lines / 100
         y = cy + k * (n * (y - cy) + sl * (yd - y))
         return y, cu + k * n * (ud - cu), cv + k * n * (vd - cv)
+
+    def osd_strokes(self, y: Tensor) -> Tensor:
+        """(H, W) 1 within reach of an OSD stroke (bright, with a dark outline) in ``y``."""
+        darkest = -F.max_pool2d(-y[None, None], 5, 1, 2)[0, 0]
+        strokes = (y >= self.glyph.glyph_level) & (darkest < y - self.glyph.glyph_outline)
+        reach = OSD_SHOWN_REACH + OSD_FEATHER
+        return F.max_pool2d(strokes.half()[None, None], 2 * reach + 1, 1, reach)[0, 0]
+
+    def osd_shown(self, frames: list[Prepared]) -> tuple[Tensor, Tensor]:
+        """The OSD alpha (full and chroma size) where the OSD shows in the window ``frames``
+        (the centre first): the recording's OSD mask covers every element ever shown (the
+        flight's readouts, the menu), and where none is shown now the picture is cleaned
+        like the rest, so no shape of untouched noise is left where text was or will be.
+        The whole window counts, so OSD that breakup has scrambled in the centre is kept.
+        Near a stroke the alpha is exactly the mask's."""
+        near = torch.stack(
+            [self.osd_strokes(p.y) if p.strokes is None else p.strokes for p in frames]
+        ).amax(0)
+        shown = self.alpha * ops.box_mean(near.float(), 2 * OSD_FEATHER + 1)
+        return shown, F.max_pool2d(shown[None, None], 2)[0, 0]
 
     def _repair_some(self, centre: Prepared, a: Aligned) -> Aligned:
         """Breakup repair, mixed with the unrepaired centre by the static-repair slider."""
@@ -856,13 +894,13 @@ class Cleaner:
         s = net.scale
         if s == 1:
             out = self._mix(net(stack) * 255.0, stack[2] * 255.0)
-            y = torch.where(self.osd, centre.y, out[0])
-            u = torch.where(self.osd_half, centre.u, ops.area_half(out[1]))
-            v = torch.where(self.osd_half, centre.v, ops.area_half(out[2]))
+            y = torch.lerp(out[0], centre.y, self.shown)
+            u = torch.lerp(ops.area_half(out[1]), centre.u, self.shown_half)
+            v = torch.lerp(ops.area_half(out[2]), centre.v, self.shown_half)
             return y, u, v
         # Upscaling network: planes come back at twice the size (chroma at the source luma
         # size), the OSD keeps the centre upscaled the same way.
-        big_osd = self.osd.repeat_interleave(s, 0).repeat_interleave(s, 1)
+        big_osd = self.shown.repeat_interleave(s, 0).repeat_interleave(s, 1)
         out = net(stack, big_osd) * 255.0
         plain = F.interpolate(stack[2:3], scale_factor=s, mode="bicubic", align_corners=False)
         out = self._mix(out, plain[0].clamp(0.0, 1.0) * 255.0)
@@ -1066,11 +1104,12 @@ def enhance(
         gcfg,
         device,
         params,
+        meas.osd_regions,
     )
     stage: Remaster | None = None
     if params.look_on:
         warp = steady_warp(src, info, meas, opts, device) if params.stabilisation > 0 else None
-        osd = torch.from_numpy(meas.osd).to(device)
+        osd = torch.from_numpy(osd_alpha(meas.osd)).to(device)
         redraw = None
         if params.osd_redraw:
             from anahd.remaster.osdlayout import analyze_clip

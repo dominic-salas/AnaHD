@@ -64,6 +64,8 @@ def test_destripe_and_derainbow_match_cpu() -> None:
     c.osd = _t(osd).bool()
     c.keep = (~c.osd).float()
     c.osd_half = _t(cv2.resize(osd.astype(np.uint8), (48, 36), interpolation=0)).bool()
+    c.alpha = c.shown = c.osd.float()  # a hard switch, as the CPU path makes
+    c.shown_half = c.osd_half.float()
     assert np.abs(_n(c.destripe(_t(y))) - clean.destripe(y, osd, cfg)).max() < 1e-2
     gu, gv = c.derainbow(_t(y), _t(u), _t(v))
     ru, rv = clean.derainbow(y, u, v, _n(c.osd_half).astype(bool), cfg)

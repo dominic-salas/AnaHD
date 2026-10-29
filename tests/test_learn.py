@@ -28,6 +28,8 @@ def _stub(h: int, w: int) -> Cleaner:
     c.osd = torch.zeros(h, w, dtype=torch.bool, device=DEV)
     c.osd[:8, :16] = True
     c.osd_half = c.osd[::2, ::2].clone()
+    c.alpha, c.alpha_half = c.osd.float(), c.osd_half.float()
+    c.shown, c.shown_half = c.alpha, c.alpha_half
     c._near_cache = {}
     c.params = RemasterParams()  # the clean-up sliders at their defaults
     c.cleanup = 1.0

@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from numpy.typing import NDArray
 
 from anahd.media import VideoInfo, probe, read_frames, read_raw
+from anahd.picture import osd_alpha
 from anahd.pipeline import Measured, Options, _full_range, _windows, measure
 
 from .grade import to_rgb
@@ -92,7 +93,7 @@ def _clip(cache: PreviewCache, path: Path, learned: bool) -> _Clip:
         gcfg = GpuConfig(repair=True, learned=weights.resolve(None) if learned else None)
         cleaner = Cleaner(
             meas.crop, meas.osd, meas.curve, meas.size, info,
-            Options().clean, Options().look, gcfg, cuda_device(),
+            Options().clean, Options().look, gcfg, cuda_device(), regions=meas.osd_regions,
         )  # fmt: skip
         cache.clips[key] = _Clip(info, meas, cleaner, fps, cleaner.detector)
     return cache.clips[key]
@@ -192,7 +193,7 @@ def preview_frame(
         warp = _steady(c, clip, m, p.stabilisation / 100) if p.stabilisation > 0 else None
         t3 = time.perf_counter()
         ms["steady"] = 1000 * (t3 - t2)
-        osd = torch.from_numpy(c.meas.osd).to("cuda")
+        osd = torch.from_numpy(osd_alpha(c.meas.osd)).to("cuda")
         redraw = _redraw(cache, c, p, clip, m.first) if p.osd_redraw else None
         stage = Remaster(c.meas.size, osd, p, torch.device("cuda"), steady=warp, redraw=redraw)
         stage.capture = m.centre
@@ -223,7 +224,7 @@ def _redraw(
         layout = analyze_clip(
             clip, p.osd_font_path or None, cli=p.osd_cli_path or None, measured=c.meas
         )
-        osd = torch.from_numpy(c.meas.osd).to("cuda")
+        osd = torch.from_numpy(osd_alpha(c.meas.osd)).to("cuda")
         cache.redraws[key] = (
             None
             if layout is None
