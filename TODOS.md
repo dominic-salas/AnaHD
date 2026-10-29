@@ -109,4 +109,20 @@
 **Priority:** P4
 **Depends on:** live view shipped
 
+### Whole-step fusion (torch.compile/Triton) and the U-Net in TensorRT
+
+**What:** Fuse the clean step's element-wise chains with torch.compile/Triton, and run the U-Net through TensorRT.
+
+**Why:** Possibly the largest remaining speed gain once the layered plan (docs/designs/faster-cleaning-and-todos.md) has shipped.
+
+**Pros:** Fewer kernels and less memory traffic; TensorRT convs are often much faster than PyTorch's.
+
+**Cons:** Native runtimes inside the PyInstaller installer; TensorRT engines are built per GPU architecture, so it needs a build cache, a first-run cost and a PyTorch fallback.
+
+**Context:** Approach C plus lever 6, deferred in the 2026-10-29 plan reviews. Reopen if the shipped gain stays under 20% (503 s to 402 s or less).
+
+**Effort:** L (human) → M (CC+gstack)
+**Priority:** P3
+**Depends on:** waves 1-3 of the faster-cleaning plan shipped
+
 ## Completed

@@ -13,6 +13,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -395,7 +396,8 @@ class Cleaner:
         def detect(*t: Tensor) -> tuple[Tensor, ...]:
             return self._detect(det, list(offsets), *t)
 
-        found = self._run(("detect", offsets), detect, (*args[:8], a.nu, a.nv))
+        found_in = (*args[:8], a.nu, a.nv)
+        found = self._run(("detect", offsets), detect, found_in, keep=0)
         # Is the row path needed at all? Reading that back makes the host wait for the GPU,
         # but always running the row path instead measured 4% slower (2026-10-28).
         rows = bool(found[-1])
@@ -403,7 +405,15 @@ class Cleaner:
         def fix(*t: Tensor) -> tuple[Tensor, ...]:
             return self._fix(det, list(offsets), rows, *t)
 
-        out = self._run(("fix", rows, offsets), fix, (*args, *noise, *found[:-1]))
+        fix_in = (*args, *noise, *found[:-1])
+        if (g := self._graphs.get(("detect", offsets))) is not None:
+            # The fix reads the detection's own copies of the inputs they share (neither
+            # step writes to its inputs), so they are copied once per frame, not twice.
+            mine = {id(t): s for t, s in zip(found_in, g.inputs, strict=True)}
+            fix_in = tuple(mine.get(id(t), t) for t in fix_in)
+        # Only the centre planes outlive this frame (as later frames' neighbours); the rest
+        # is used before the next replay, in stream order, so it is not copied out.
+        out = self._run(("fix", rows, offsets), fix, fix_in, keep=3)
         centre.y, centre.u, centre.v = out[:3]
         flow, y, u, v, valid, blur = out[3:]
         return Aligned(flow, y, u, v, valid, a.offsets, a.dist, a.ny, a.nu, a.nv, a.nn, a.wn, blur)
@@ -413,15 +423,23 @@ class Cleaner:
         key: tuple[object, ...],
         fn: Callable[..., tuple[Tensor, ...]],
         args: tuple[Tensor, ...],
+        keep: int | None = None,
     ) -> list[Tensor]:
+        """``fn(*args)``, replayed from a CUDA graph when it can be. A graph's outputs are
+        overwritten by its next replay: the first ``keep`` (all when None) are copied out,
+        the rest must be used up before then. Inputs that are another graph's own buffers
+        are read in place."""
         offsets = key[-1]
         if not isinstance(offsets, tuple):
             raise TypeError("the last key item must be the window's offsets")
         if not (self.gcfg.graphs and len(set(offsets)) == len(offsets)):
             return list(fn(*args))
         if key not in self._graphs:
-            self._graphs[key] = _Graph(fn, args, self._state())
-        return [x.clone() for x in self._graphs[key](*args)]
+            owned = {id(t) for g in self._graphs.values() for t in (*g.inputs, *g.out)}
+            self._graphs[key] = _Graph(fn, args, self._state(), owned)
+        out = self._graphs[key](*args)
+        n = len(out) if keep is None else keep
+        return [x.clone() for x in out[:n]] + list(out[n:])
 
     def _state(self) -> list[Tensor]:
         return [self._stats, self._velocity, self._known, self._bad_run, self._flags]
@@ -915,15 +933,18 @@ class Cleaner:
 
 class _Graph:
     """``fn`` captured in a CUDA graph for inputs shaped like ``example``; ``state`` (tensors
-    ``fn`` updates in place) is restored after the warm-up runs, so they leave no trace."""
+    ``fn`` updates in place) is restored after the warm-up runs, so they leave no trace.
+    Example tensors whose ids are in ``adopt`` (another graph's buffers, refilled by it on
+    the same stream) are used as they are, and each call must pass those same tensors."""
 
     def __init__(
         self,
         fn: Callable[..., tuple[Tensor, ...]],
         example: tuple[Tensor, ...],
         state: list[Tensor],
+        adopt: AbstractSet[int] = frozenset(),
     ) -> None:
-        self.inputs = [t.clone() for t in example]
+        self.inputs = [t if id(t) in adopt else t.clone() for t in example]
         saved = [t.clone() for t in state]
         dev = example[0].device
         side = torch.cuda.Stream(dev)  # type: ignore[no-untyped-call, unused-ignore]
@@ -940,7 +961,8 @@ class _Graph:
 
     def __call__(self, *args: Tensor) -> tuple[Tensor, ...]:
         for dst, src in zip(self.inputs, args, strict=True):
-            dst.copy_(src)
+            if dst is not src:
+                dst.copy_(src)
         self.graph.replay()
         return self.out
 
@@ -953,9 +975,11 @@ def _noise(p: Prepared) -> Tensor:
 
 def _norm_grid(pos: Tensor, w: int, h: int) -> Tensor:
     """(S, 2, H, W) pixel positions -> grid_sample's (S, H, W, 2), align_corners=True."""
-    gx = pos[:, 0] * (2.0 / (w - 1)) - 1.0
-    gy = pos[:, 1] * (2.0 / (h - 1)) - 1.0
-    return torch.stack([gx, gy], -1)
+    s, _, rows, cols = pos.shape
+    grid = pos.new_empty(s, rows, cols, 2)  # written in place: no separate stack pass
+    torch.sub(pos[:, 0] * (2.0 / (w - 1)), 1.0, out=grid[..., 0])
+    torch.sub(pos[:, 1] * (2.0 / (h - 1)), 1.0, out=grid[..., 1])
+    return grid
 
 
 _END = object()
