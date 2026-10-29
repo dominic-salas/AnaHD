@@ -140,9 +140,10 @@ AnaHD was built for my own flying. The recordings it was developed and tested on
 **What does not**
 - **The Classic cleaning** (hand-made: motion-aligned fusion of neighbouring frames,
   stripe and rainbow removal, upscaling) behaves the same on any analog recording.
-- **OSD protection** finds any overlay that stays put while the picture moves, whatever its
-  font or layout, and keeps it sharp. A blinking or moving element may be missed, and a
-  scene that barely moves can have some of its static detail taken for OSD.
+- **OSD protection** finds the burned-in OSD by its strokes (bright with a dark outline),
+  whatever its font or layout, and keeps it sharp while it is on screen; the cleaned picture
+  fades in around it, so no box shows. A moving element (the horizon while rolling) is not
+  protected.
 - **Other DVR formats**: tested on synthetic recordings at 1280x720 (4:3 in bars), 720x480
   NTSC (pixel shape tagged or not), 720x576 PAL at 50 fps, 640x480 MJPEG 4:2:2 (older
   DVRs) and full-frame 16:9: all come out at the right shape (4:3 as 1440x1080, 16:9 as

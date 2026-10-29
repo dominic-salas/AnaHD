@@ -13,6 +13,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from anahd.gpu.upscale import Upscaler, reduce
 from anahd.look import LookConfig
 from anahd.media import Crop, Encoder, VideoInfo, probe, read_raw
 from anahd.model.infer import LearnedRestorer
+from anahd.picture import OSD_FEATHER, OSD_SHOWN_REACH, PictureConfig, osd_alpha, osd_boxes
 from anahd.pipeline import Measured, Options, Result, _windows, measure
 from anahd.remaster.params import RemasterParams
 from anahd.remaster.stage import Frame as RFrame
@@ -115,6 +117,7 @@ class Prepared:
     enc: Encoded
     yb: Tensor  # luma lightly blurred, 0..1, for flow refinement
     noise: Tensor | None = None  # chroma noise (breakup.chroma_noise), when repairing
+    strokes: Tensor | None = None  # (H, W) 1 within reach of an OSD stroke shown in it
 
 
 def _ycc_matrix(kr: float, kb: float) -> np.ndarray:
@@ -151,7 +154,12 @@ class Cleaner:
         gcfg: GpuConfig,
         device: torch.device,
         params: RemasterParams | None = None,
+        regions: np.ndarray | None = None,
     ) -> None:
+        """``osd``: the OSD's own pixels (``picture.detect_osd``), kept uncleaned;
+        ``regions``: where overlays may be (``picture.detect_osd_regions``), left out when
+        judging the picture (breakup, motion) and taken whole in a repaired row; each OSD
+        element's box when not given."""
         self.dev = device
         self.gcfg = gcfg
         self.params = params or RemasterParams()
@@ -169,16 +177,24 @@ class Cleaner:
             return torch.from_numpy(np.ascontiguousarray(a)).to(device)
 
         self.osd = t(osd)
-        self.keep = (~self.osd).float()
-        self.keep_half = ops.area_half(self.keep)
+        # How much of each pixel keeps the plain centre frame: 1 on the OSD, fading to 0 just
+        # outside it, so no hard edge of untouched noise shows around it. A chroma sample is
+        # OSD wherever any of its four luma pixels is.
+        self.alpha = t(osd_alpha(osd))
+        self.glyph = PictureConfig()  # what an OSD stroke looks like
+        self.alpha_half = F.max_pool2d(self.alpha[None, None], 2)[0, 0]
+        self.keep = 1.0 - self.alpha
+        self.keep_half = 1.0 - self.alpha_half
+        # The same, only where the OSD shows in the frame being cleaned (set per frame).
+        self.shown, self.shown_half = self.alpha, self.alpha_half
         nearest = cv2.INTER_NEAREST
-        self.osd_half = t(
-            cv2.resize(osd.astype(np.uint8), (w // 2, h // 2), interpolation=nearest) > 0
-        )
         small = (round(w * clean.flow_scale), round(h * clean.flow_scale))
         self.small = small
+        # Motion is followed, and damage judged, on the picture alone: the overlay regions
+        # are filled in for the flow and left out of the breakup detector.
+        boxes = osd_boxes(osd) if regions is None else regions
         self.fill = ops.Filler(
-            t(cv2.resize(osd.astype(np.uint8), small, interpolation=nearest) > 0)
+            t(cv2.resize(boxes.astype(np.uint8), small, interpolation=nearest) > 0)
         )
         self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device)
         self.curve = t(curve.astype(np.float32))
@@ -206,7 +222,8 @@ class Cleaner:
             torch.from_numpy(np.linalg.inv(_ycc_matrix(0.2126, 0.0722))).float().to(device)
         )
         repair = gcfg.repair and self.params.static_repair > 0
-        self.detector = Detector(self.keep, gcfg.breakup) if repair else None
+        self.judged = (~t(boxes)).float()
+        self.detector = Detector(self.judged, gcfg.breakup) if repair else None
         self.learned: LearnedRestorer | None = None
         if gcfg.learned is not None:
             # Full strength here: the clean-up sliders mix it with the plain frame (_mix).
@@ -275,7 +292,8 @@ class Cleaner:
             ].round()
         small = self.fill(small)
         noise = None if self.detector is None else chroma_noise(u, v)  # once per frame
-        return Prepared(y, u, v, self.flow.encode(small), ops.gaussian(y, 1.0) / 255.0, noise)
+        yb = ops.gaussian(y, 1.0) / 255.0
+        return Prepared(y, u, v, self.flow.encode(small), yb, noise, self.osd_strokes(y))
 
     def align(self, centre: Prepared, neighbours: list[tuple[int, Prepared]]) -> Aligned:
         """Each neighbour warped onto the centre (``neighbours`` must not be empty)."""
@@ -326,8 +344,10 @@ class Cleaner:
         warped = F.grid_sample(
             ny[:, None], g, mode="bicubic", padding_mode="border", align_corners=True
         )[:, 0]
+        # Breakup repair judges the neighbours on the picture alone (as 0.1.2 did); fusion
+        # takes the OSD's own pixels out on its own (``blend``).
         valid = F.grid_sample(
-            self.keep.expand(len(offsets), 1, h, w),
+            self.judged.expand(len(offsets), 1, h, w),
             g,
             mode="bilinear",
             padding_mode="zeros",
@@ -360,7 +380,18 @@ class Cleaner:
         ref = ops.gaussian(cy, 1.2, size=(5, 5))
         diff = (a.blur - ref).abs()
         match = 1.0 / (1.0 + (diff / cfg.match_sigma) ** 4)
-        weight = match * a.valid * self.keep * a.dist
+        # The neighbours' own OSD pixels take no part, and nothing more: a wider region left
+        # out would leave a box of unfused noise around the OSD.
+        h, w = self.h, self.w
+        g = _norm_grid(self.grid[None] + a.flow, w, h)
+        picture = F.grid_sample(
+            self.keep.expand(len(a.offsets), 1, h, w),
+            g,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=True,
+        )[:, 0].clamp(0.0, 1.0)
+        weight = match * picture * self.keep * a.dist
         y = (cy + (weight * warped).sum(0)) / (1.0 + weight.sum(0))
 
         centre_u, centre_v = cu, cv
@@ -395,7 +426,8 @@ class Cleaner:
         def detect(*t: Tensor) -> tuple[Tensor, ...]:
             return self._detect(det, list(offsets), *t)
 
-        found = self._run(("detect", offsets), detect, (*args[:8], a.nu, a.nv))
+        found_in = (*args[:8], a.nu, a.nv)
+        found = self._run(("detect", offsets), detect, found_in, keep=0)
         # Is the row path needed at all? Reading that back makes the host wait for the GPU,
         # but always running the row path instead measured 4% slower (2026-10-28).
         rows = bool(found[-1])
@@ -403,7 +435,15 @@ class Cleaner:
         def fix(*t: Tensor) -> tuple[Tensor, ...]:
             return self._fix(det, list(offsets), rows, *t)
 
-        out = self._run(("fix", rows, offsets), fix, (*args, *noise, *found[:-1]))
+        fix_in = (*args, *noise, *found[:-1])
+        if (g := self._graphs.get(("detect", offsets))) is not None:
+            # The fix reads the detection's own copies of the inputs they share (neither
+            # step writes to its inputs), so they are copied once per frame, not twice.
+            mine = {id(t): s for t, s in zip(found_in, g.inputs, strict=True)}
+            fix_in = tuple(mine.get(id(t), t) for t in fix_in)
+        # Only the centre planes outlive this frame (as later frames' neighbours); the rest
+        # is used before the next replay, in stream order, so it is not copied out.
+        out = self._run(("fix", rows, offsets), fix, fix_in, keep=3)
         centre.y, centre.u, centre.v = out[:3]
         flow, y, u, v, valid, blur = out[3:]
         return Aligned(flow, y, u, v, valid, a.offsets, a.dist, a.ny, a.nu, a.nv, a.nn, a.wn, blur)
@@ -413,15 +453,23 @@ class Cleaner:
         key: tuple[object, ...],
         fn: Callable[..., tuple[Tensor, ...]],
         args: tuple[Tensor, ...],
+        keep: int | None = None,
     ) -> list[Tensor]:
+        """``fn(*args)``, replayed from a CUDA graph when it can be. A graph's outputs are
+        overwritten by its next replay: the first ``keep`` (all when None) are copied out,
+        the rest must be used up before then. Inputs that are another graph's own buffers
+        are read in place."""
         offsets = key[-1]
         if not isinstance(offsets, tuple):
             raise TypeError("the last key item must be the window's offsets")
         if not (self.gcfg.graphs and len(set(offsets)) == len(offsets)):
             return list(fn(*args))
         if key not in self._graphs:
-            self._graphs[key] = _Graph(fn, args, self._state())
-        return [x.clone() for x in self._graphs[key](*args)]
+            owned = {id(t) for g in self._graphs.values() for t in (*g.inputs, *g.out)}
+            self._graphs[key] = _Graph(fn, args, self._state(), owned)
+        out = self._graphs[key](*args)
+        n = len(out) if keep is None else keep
+        return [x.clone() for x in out[:n]] + list(out[n:])
 
     def _state(self) -> list[Tensor]:
         return [self._stats, self._velocity, self._known, self._bad_run, self._flags]
@@ -657,14 +705,14 @@ class Cleaner:
         total = ops.row_box_sum(detail, cfg.stripe_window)
         count = ops.row_box_sum(self.keep, cfg.stripe_window)
         out = y - total / count.clamp_min(1.0)
-        return torch.where(self.osd, y, out)
+        return torch.lerp(out, y, self.shown)
 
     def derainbow(self, y: Tensor, u: Tensor, v: Tensor) -> tuple[Tensor, Tensor]:
         cfg = self.cfg
         yh = ops.area_half(y)
         texture = ops.gaussian((yh - ops.gaussian(yh, 1.0)).abs(), 2.0)
         cut = cfg.rainbow_cut * (texture / cfg.rainbow_texture).clamp(0.0, 1.0)
-        cut = torch.where(self.osd_half, torch.zeros_like(cut), cut)
+        cut = cut * (1.0 - self.shown_half)
         out = []
         for c in (u, v):
             low = ops.gaussian(c, 1.5)
@@ -747,6 +795,7 @@ class Cleaner:
             if self.detector is not None:
                 a = self._repair_some(centre, a)
         self.last_flow = None if a is None else (a.flow, list(a.offsets))
+        self.shown, self.shown_half = self.osd_shown([centre, *(p for _, p in neighbours)])
         if self.learned is not None:
             # The network replaces fusion, destripe and derainbow; only alignment (and repair)
             # are needed for it.
@@ -761,6 +810,26 @@ class Cleaner:
         n, sl = p.noise / 100, p.scan_lines / 100
         y = cy + k * (n * (y - cy) + sl * (yd - y))
         return y, cu + k * n * (ud - cu), cv + k * n * (vd - cv)
+
+    def osd_strokes(self, y: Tensor) -> Tensor:
+        """(H, W) 1 within reach of an OSD stroke (bright, with a dark outline) in ``y``."""
+        darkest = -F.max_pool2d(-y[None, None], 5, 1, 2)[0, 0]
+        strokes = (y >= self.glyph.glyph_level) & (darkest < y - self.glyph.glyph_outline)
+        reach = OSD_SHOWN_REACH + OSD_FEATHER
+        return ops.dilate(strokes.half(), reach)
+
+    def osd_shown(self, frames: list[Prepared]) -> tuple[Tensor, Tensor]:
+        """The OSD alpha (full and chroma size) where the OSD shows in the window ``frames``
+        (the centre first): the recording's OSD mask covers every element ever shown (the
+        flight's readouts, the menu), and where none is shown now the picture is cleaned
+        like the rest, so no shape of untouched noise is left where text was or will be.
+        The whole window counts, so OSD that breakup has scrambled in the centre is kept.
+        Near a stroke the alpha is exactly the mask's."""
+        near = torch.stack(
+            [self.osd_strokes(p.y) if p.strokes is None else p.strokes for p in frames]
+        ).amax(0)
+        shown = self.alpha * ops.box_mean(near.float(), 2 * OSD_FEATHER + 1)
+        return shown, F.max_pool2d(shown[None, None], 2)[0, 0]
 
     def _repair_some(self, centre: Prepared, a: Aligned) -> Aligned:
         """Breakup repair, mixed with the unrepaired centre by the static-repair slider."""
@@ -838,13 +907,13 @@ class Cleaner:
         s = net.scale
         if s == 1:
             out = self._mix(net(stack) * 255.0, stack[2] * 255.0)
-            y = torch.where(self.osd, centre.y, out[0])
-            u = torch.where(self.osd_half, centre.u, ops.area_half(out[1]))
-            v = torch.where(self.osd_half, centre.v, ops.area_half(out[2]))
+            y = torch.lerp(out[0], centre.y, self.shown)
+            u = torch.lerp(ops.area_half(out[1]), centre.u, self.shown_half)
+            v = torch.lerp(ops.area_half(out[2]), centre.v, self.shown_half)
             return y, u, v
         # Upscaling network: planes come back at twice the size (chroma at the source luma
         # size), the OSD keeps the centre upscaled the same way.
-        big_osd = self.osd.repeat_interleave(s, 0).repeat_interleave(s, 1)
+        big_osd = self.shown.repeat_interleave(s, 0).repeat_interleave(s, 1)
         out = net(stack, big_osd) * 255.0
         plain = F.interpolate(stack[2:3], scale_factor=s, mode="bicubic", align_corners=False)
         out = self._mix(out, plain[0].clamp(0.0, 1.0) * 255.0)
@@ -915,15 +984,18 @@ class Cleaner:
 
 class _Graph:
     """``fn`` captured in a CUDA graph for inputs shaped like ``example``; ``state`` (tensors
-    ``fn`` updates in place) is restored after the warm-up runs, so they leave no trace."""
+    ``fn`` updates in place) is restored after the warm-up runs, so they leave no trace.
+    Example tensors whose ids are in ``adopt`` (another graph's buffers, refilled by it on
+    the same stream) are used as they are, and each call must pass those same tensors."""
 
     def __init__(
         self,
         fn: Callable[..., tuple[Tensor, ...]],
         example: tuple[Tensor, ...],
         state: list[Tensor],
+        adopt: AbstractSet[int] = frozenset(),
     ) -> None:
-        self.inputs = [t.clone() for t in example]
+        self.inputs = [t if id(t) in adopt else t.clone() for t in example]
         saved = [t.clone() for t in state]
         dev = example[0].device
         side = torch.cuda.Stream(dev)  # type: ignore[no-untyped-call, unused-ignore]
@@ -940,7 +1012,8 @@ class _Graph:
 
     def __call__(self, *args: Tensor) -> tuple[Tensor, ...]:
         for dst, src in zip(self.inputs, args, strict=True):
-            dst.copy_(src)
+            if dst is not src:
+                dst.copy_(src)
         self.graph.replay()
         return self.out
 
@@ -953,9 +1026,11 @@ def _noise(p: Prepared) -> Tensor:
 
 def _norm_grid(pos: Tensor, w: int, h: int) -> Tensor:
     """(S, 2, H, W) pixel positions -> grid_sample's (S, H, W, 2), align_corners=True."""
-    gx = pos[:, 0] * (2.0 / (w - 1)) - 1.0
-    gy = pos[:, 1] * (2.0 / (h - 1)) - 1.0
-    return torch.stack([gx, gy], -1)
+    s, _, rows, cols = pos.shape
+    grid = pos.new_empty(s, rows, cols, 2)  # written in place: no separate stack pass
+    torch.sub(pos[:, 0] * (2.0 / (w - 1)), 1.0, out=grid[..., 0])
+    torch.sub(pos[:, 1] * (2.0 / (h - 1)), 1.0, out=grid[..., 1])
+    return grid
 
 
 _END = object()
@@ -1042,11 +1117,12 @@ def enhance(
         gcfg,
         device,
         params,
+        meas.osd_regions,
     )
     stage: Remaster | None = None
     if params.look_on:
         warp = steady_warp(src, info, meas, opts, device) if params.stabilisation > 0 else None
-        osd = torch.from_numpy(meas.osd).to(device)
+        osd = torch.from_numpy(osd_alpha(meas.osd)).to(device)
         redraw = None
         if params.osd_redraw:
             from anahd.remaster.osdlayout import analyze_clip
@@ -1126,7 +1202,8 @@ def enhance(
                     put(cleaner.clean(centre, nbs))
                 else:
                     y, u, v = cleaner.clean_planes(centre, nbs)
-                    for packed in stage.push(RFrame(y, u, v, cleaner.flows_at(half))):
+                    frame = RFrame(y, u, v, cleaner.flows_at(half), osd=cleaner.shown)
+                    for packed in stage.push(frame):
                         put(packed)
                 if progress is not None:
                     progress(done)

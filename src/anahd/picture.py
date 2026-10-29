@@ -1,8 +1,8 @@
 """Where the picture is: the 4:3 area inside the DVR's black bars, and the burned-in OSD.
 
 Adapted from FPVEdit's ``picture.py`` (same author, MIT). Both are estimated from frames
-spread over the recording. The OSD mask covers each OSD element's whole box, so digits
-that change between samples are covered too.
+spread over the recording. The OSD mask covers each OSD element's strokes (every stroke
+seen in any sample, so digits that change are covered too) and their outline, not its box.
 """
 
 from __future__ import annotations
@@ -18,6 +18,9 @@ from anahd.media import Crop, Plane
 BoolMask = NDArray[np.bool_]
 
 MIN_FRAMES = 6
+OSD_GROW = 4  # px around the OSD's strokes: their dark outline and halo
+OSD_FEATHER = 4  # px outside the OSD over which cleaning fades in
+OSD_SHOWN_REACH = 24  # px: a stroke shown this close counts its whole element as shown
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,55 @@ def detect_osd(frames: list[Plane], config: PictureConfig | None = None) -> Bool
     stable = (changes < config.static_change).mean(axis=0) >= config.static_stability
     median = np.median(stack, axis=0).astype(np.uint8)
     edges = np.asarray(cv2.morphologyEx(median, cv2.MORPH_GRADIENT, kernel)) > config.static_edge
+
+    # An OSD element is where glyphs are: the OSD font draws every element (digits, icons,
+    # crosshair, horizon) as bright strokes with a dark outline. Join each element's strokes;
+    # large regions are scenery.
+    joined = np.asarray(
+        cv2.morphologyEx(
+            glyph_mask.astype(np.uint8),
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (25, 15)),
+        )
+    )
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(joined, connectivity=8)
+    strokes = np.bincount(labels[glyph_mask].astype(np.intp), minlength=count)
+    boxes = stats[:, cv2.CC_STAT_WIDTH] * stats[:, cv2.CC_STAT_HEIGHT]
+    ok = (boxes <= config.max_overlay_box * joined.size) & (strokes >= config.min_overlay_pixels)
+    ok[0] = False
+    element = ok[labels]
+    # Only the element's own pixels, never its box: a box of untouched noise in a cleaned
+    # picture shows. A stroke seen in any sample counts (digits change), and so does what
+    # holds still with an edge in the element (outlines, icons); grown to take in
+    # the outline and halo.
+    mask = ((glyphs > 0) | (stable & edges)) & element
+    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * OSD_GROW + 1, 2 * OSD_GROW + 1))
+    return np.asarray(cv2.dilate(mask.astype(np.uint8), grow), dtype=bool)
+
+
+def detect_osd_regions(frames: list[Plane], config: PictureConfig | None = None) -> BoolMask:
+    """Where burned-in overlays may be, at the frames' size (all False if unsure): each
+    element's whole box, and still detailed areas (which may be scenery). What the cleaning
+    leaves out when judging the picture (breakup, motion, levels), never what it leaves
+    uncleaned: that is ``detect_osd``."""
+    config = config or PictureConfig()
+    shape = frames[0].shape
+    if len(frames) < MIN_FRAMES:
+        return np.zeros(shape, dtype=bool)
+    stack = np.stack(frames)
+    kernel = np.ones((3, 3), np.uint8)
+    glyphs = np.zeros(shape, dtype=np.float64)
+    for frame in stack:
+        darkest_nearby = np.asarray(cv2.erode(frame, np.ones((5, 5), np.uint8)), dtype=np.int16)
+        bright = frame >= config.glyph_level
+        outlined = darkest_nearby < frame.astype(np.int16) - config.glyph_outline
+        glyphs += bright & outlined
+    glyph_mask = glyphs / len(stack) >= config.glyph_presence
+
+    changes = np.abs(np.diff(stack.astype(np.int16), axis=0))
+    stable = (changes < config.static_change).mean(axis=0) >= config.static_stability
+    median = np.median(stack, axis=0).astype(np.uint8)
+    edges = np.asarray(cv2.morphologyEx(median, cv2.MORPH_GRADIENT, kernel)) > config.static_edge
     mask = (glyph_mask | (stable & edges)).astype(np.uint8)
 
     # Join each element's strokes and cover its whole box; large static regions are scenery.
@@ -118,6 +170,35 @@ def detect_osd(frames: list[Plane], config: PictureConfig | None = None) -> Bool
             filled[y : y + h, x : x + w] = 1
     grown = cv2.dilate(filled, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)))
     return np.asarray(grown, dtype=bool)
+
+
+def osd_boxes(osd: BoolMask) -> BoolMask:
+    """Each OSD element's whole box (its strokes joined, a margin around them): what to
+    leave out when judging the picture itself, never what to leave uncleaned (a box of
+    untouched noise shows)."""
+    joined = np.asarray(
+        cv2.morphologyEx(
+            osd.astype(np.uint8),
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (25, 15)),
+        )
+    )
+    _, _, stats, _ = cv2.connectedComponentsWithStats(joined, connectivity=8)
+    boxes = np.zeros_like(joined)
+    for x, y, w, h, _ in stats[1:]:
+        boxes[y : y + h, x : x + w] = 1
+    grown = cv2.dilate(boxes, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)))
+    return np.asarray(grown, dtype=bool)
+
+
+def osd_alpha(osd: BoolMask) -> NDArray[np.float32]:
+    """How much of each pixel is OSD: 1 on the mask, falling to 0 over ``OSD_FEATHER`` px
+    outside it, so the switch between the untouched OSD and the cleaned picture is soft and
+    no OSD pixel is ever partly cleaned."""
+    if not osd.any():
+        return np.zeros(osd.shape, np.float32)
+    outside = cv2.distanceTransform((~osd).astype(np.uint8), cv2.DIST_L2, 5)
+    return np.clip(1.0 - outside / (OSD_FEATHER + 1), 0.0, 1.0).astype(np.float32)
 
 
 STANDARD_ASPECTS = (4 / 3, 16 / 9)

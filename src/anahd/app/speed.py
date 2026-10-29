@@ -54,9 +54,10 @@ def frame_ms(params: RemasterParams, learned: bool) -> float:
     return ms
 
 
-def _flight(params: RemasterParams, learned: bool) -> tuple[float, float]:
-    """Frames per second and seconds for a 3-minute flight."""
-    per_frame = frame_ms(params, learned)
+def _flight(params: RemasterParams, learned: bool, ratio: float = 1.0) -> tuple[float, float]:
+    """Frames per second and seconds for a 3-minute flight; ``ratio``: this machine's speed
+    over the measured one (``calibrate``)."""
+    per_frame = frame_ms(params, learned) / ratio
     if params.stabilisation > 0:
         per_frame += STEADY_PASS_MS
     seconds = START_S + FLIGHT_FRAMES * per_frame / 1000
@@ -93,9 +94,9 @@ def costs(params: RemasterParams, learned: bool) -> dict[str, float]:
     return out
 
 
-def estimate(params: RemasterParams, learned: bool) -> tuple[float, str | None]:
+def estimate(params: RemasterParams, learned: bool, ratio: float = 1.0) -> tuple[float, str | None]:
     """Frames per second over a 3-minute flight, and a warning below the 10-minute rule."""
-    fps, seconds = _flight(params, learned)
+    fps, seconds = _flight(params, learned, ratio)
     if fps >= RULE_FPS:
         return fps, None
     minutes = seconds / 60
@@ -103,3 +104,24 @@ def estimate(params: RemasterParams, learned: bool) -> tuple[float, str | None]:
         f"Below {RULE_FPS:.0f} fps: a 3-minute flight takes about {minutes:.1f} minutes "
         "with these effects (more than 10)"
     )
+
+
+MIN_CALIBRATION_FRAMES = 600  # shorter runs are mostly start-up
+RATIO_RANGE = (0.5, 2.0)
+
+
+def calibrate(
+    old: float | None, frames: int, seconds: float, params: RemasterParams, learned: bool
+) -> float | None:
+    """This machine's speed over the measured one after a completed run of ``frames`` in
+    ``seconds``: the run's steady speed (start-up taken off) over the estimate's, averaged
+    half and half with the ``old`` ratio and kept within ``RATIO_RANGE``. None (keep the old
+    one) for a run too short to tell."""
+    if frames < MIN_CALIBRATION_FRAMES or seconds <= START_S:
+        return old
+    estimated_ms = frame_ms(params, learned) + (STEADY_PASS_MS if params.stabilisation > 0 else 0)
+    measured_ms = (seconds - START_S) * 1000 / frames
+    ratio = estimated_ms / measured_ms
+    if old is not None:
+        ratio = (old + ratio) / 2
+    return min(max(ratio, RATIO_RANGE[0]), RATIO_RANGE[1])

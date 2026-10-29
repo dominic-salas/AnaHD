@@ -128,7 +128,10 @@ def pulsing(d: NDArray[np.float32], keep: NDArray[np.bool_] | None = None) -> tu
     th, tw = h // TILE, w // TILE
     tiles = d[: th * TILE, : tw * TILE].reshape(th, TILE, tw, TILE).mean(axis=(1, 3))
     if keep is not None:
-        k = keep[: th * TILE, : tw * TILE].reshape(th, TILE, tw, TILE).all(axis=(1, 3))
+        share = keep[: th * TILE, : tw * TILE].reshape(th, TILE, tw, TILE).mean(axis=(1, 3))
+        k = share == 1.0
+        if not k.any():  # the still parts are scattered: tiles that are mostly still
+            k = share >= 0.5
         vals = tiles[k]
     else:
         vals = tiles.ravel()

@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QItemSelectionModel, QLocale, QSettings, Qt, QTime
 from PySide6.QtGui import QAction, QCloseEvent, QImage, QPixmap
@@ -52,6 +53,7 @@ from anahd.app.cliplist import (
     SHARE,
     STATUS,
     THUMB,
+    THUMB_SIZE,
     ClipList,
     fit_cards,
     pixmap_from_png,
@@ -64,7 +66,7 @@ from anahd.app.look import DotTitle, Spinner, StatusDot, app_icon
 from anahd.app.player import PlayThread, Screen
 from anahd.app.preview import Preview, Wipe
 from anahd.app.remaster_panel import RemasterPanel
-from anahd.app.speed import costs, estimate
+from anahd.app.speed import calibrate, costs, estimate
 from anahd.app.timeline import Timeline, kept_seconds
 from anahd.app.worker import Runner
 from anahd.cli import default_output, is_output, part_outputs
@@ -83,6 +85,9 @@ BUSY_HEADING = "Preview · before / after paused while cleaning"
 START_S = 9.0  # a queued clip's start-up (measuring, loading the models)
 
 
+SPEED_RATIOS = "speed_ratio"  # settings group: this machine's measured speed ratios
+
+
 @dataclass
 class Clip:
     path: Path
@@ -98,6 +103,7 @@ class Clip:
     skip: bool = False  # looks digital: left out of CLEAN unless included
     origin: Origin | None = None
     params: RemasterParams | None = None  # the settings it was cleaned with
+    learned: bool = True  # cleaned with the learned engine (else the classic one)
 
     @property
     def editable(self) -> bool:
@@ -403,6 +409,7 @@ class MainWindow(QMainWindow):
         self._panel = RemasterPanel()
         self._panel.set_params(self._saved_params())
         self._panel.changed.connect(self._params_changed)
+        self._panel.reset_button.clicked.connect(self._forget_speed)
         settings_col = column(eyebrow("Remaster settings"), self._panel, stretch=self._panel)
         middle = split_page(right, settings_col, (8, 3))
         middle_layout = middle.layout()
@@ -769,11 +776,49 @@ class MainWindow(QMainWindow):
         self._update_speed()
         self._request_frame()
 
+    def _speed_key(self, gpu: str, learned: bool) -> str:
+        name = gpu.replace("/", " ").replace("\\", " ")
+        return f"{SPEED_RATIOS}/{name} {__version__} {'learned' if learned else 'classic'}"
+
+    def _speed_ratio(self, learned: bool) -> float | None:
+        """This machine's speed over the estimate's, as measured on the last GPU used."""
+        gpu = str(self._settings.value("gpu", "") or "")
+        if not gpu:
+            return None
+        value = self._settings.value(self._speed_key(gpu, learned))
+        try:
+            return None if value is None else float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _learn_speed(self, clip: Clip, gpu: str, frames: int, seconds: float) -> None:
+        """After a completed run: the estimate learns this machine's speed (per GPU, app
+        version and engine; a stopped, failed or short run teaches nothing)."""
+        if not gpu or clip.params is None:
+            return
+        self._settings.setValue("gpu", gpu)
+        key = self._speed_key(gpu, clip.learned)
+        old = self._speed_ratio(clip.learned)
+        ratio = calibrate(old, frames, seconds, clip.params, clip.learned)
+        if ratio is not None and ratio != old:
+            self._settings.setValue(key, ratio)
+            self._update_speed()
+
+    def _forget_speed(self) -> None:
+        self._settings.remove(SPEED_RATIOS)
+        self._update_speed()
+
     def _update_speed(self) -> None:
         params, learned = self._panel.params(), self._learned()
         self._panel.set_costs(costs(params, learned))
-        fps, warning = estimate(params, learned)
-        text = f"Estimated speed: about {fps:.0f} fps (RTX 4070 Ti, 720p recording)"
+        ratio = self._speed_ratio(learned)
+        fps, warning = estimate(params, learned, ratio or 1.0)
+        where = (
+            f"measured on this PC's {self._settings.value('gpu')}"
+            if ratio is not None
+            else "RTX 4070 Ti, 720p recording"
+        )
+        text = f"Estimated speed: about {fps:.0f} fps ({where})"
         self._panel.speed.setText(text + (f"\n{warning}" if warning else ""))
         restyle(self._panel.speed, "role", "warning" if warning else "caption")
 
@@ -971,7 +1016,7 @@ class MainWindow(QMainWindow):
         clip.cleaned_cuts = list(clip.cuts)
         self._etas.pop(clip.path, None)
         self._set_status(clip, "Starting...", 0.0)
-        clip.params = self._panel.params()
+        clip.params, clip.learned = self._panel.params(), self._learned()
         self._runner.start(
             clip.path,
             self._target(clip),
@@ -998,13 +1043,15 @@ class MainWindow(QMainWindow):
         self._set_status(clip, text, share)
         self._refresh()
 
-    def _finished(
-        self, path: Path, info: tuple[int, float, tuple[int, int, int, int], str]
-    ) -> None:
-        frames, took, crop, notes = info
+    def _finished(self, path: Path, info: tuple[object, ...]) -> None:
+        done = cast(tuple[int, float, tuple[int, int, int, int], str], info[:4])
+        frames, took, crop, notes = done
+        gpu = str(info[4]) if len(info) > 4 else ""  # older workers send no GPU name
         clip = self._clips.get(path)
         if clip is not None:
+            self._learn_speed(clip, gpu, int(frames), float(took))
             clip.state = DONE
+            self._show_cleaned_thumb(clip)
             self._set_status(clip, f"Done   {clock(took)}   {frames / max(took, 1e-6):.1f} fps")
             clip.item.setToolTip(notes)
             self._reader.set_crop(path, Crop(*crop))
@@ -1012,6 +1059,22 @@ class MainWindow(QMainWindow):
         self._next()
         if clip is not None and self._selected() is clip:
             self._load_clip(clip)
+
+    def _show_cleaned_thumb(self, clip: Clip) -> None:
+        """A cleaned clip's card shows its last live "after" picture (none received: the
+        thumbnail stays as it was)."""
+        live = self._live.get(clip.path)
+        after = pixmap_from_png(live[1]) if live is not None else None
+        if after is not None:
+            size = THUMB_SIZE * 2  # sharp on a high-DPI screen
+            clip.item.setData(
+                THUMB,
+                after.scaled(
+                    size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ),
+            )
 
     def _failed(self, path: Path, message: str) -> None:
         clip = self._clips.get(path)

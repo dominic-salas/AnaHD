@@ -22,6 +22,7 @@ from torch import Tensor
 
 from anahd.gpu import ops
 from anahd.look import scale_matrix
+from anahd.picture import OSD_FEATHER, OSD_SHOWN_REACH, PictureConfig
 from anahd.steady import Plan, SteadyConfig, _zoom_for, matrix
 
 from .grade import LOOK, FilmLook, apply_lut, build_lut, to_rgb, to_ycc
@@ -53,6 +54,8 @@ class Frame:
     flows: dict[int, Tensor] = field(default_factory=dict)  # d -> (2, H/2, W/2), chroma px
     index: int = 0
     mean: Tensor | None = None  # mean colour after the temporal clean-up
+    strokes: Tensor | None = None  # (H, W) 1 within reach of an OSD stroke shown in it
+    osd: Tensor | None = None  # source-size OSD alpha where the OSD shows (Cleaner.shown)
 
 
 @dataclass
@@ -78,8 +81,12 @@ class Remaster:
         w, h = size
         self.w, self.h, self.dev = w, h, device
         self.p, self.look = params, look
-        # The OSD boxes at the output size; per frame only their static strokes are kept.
-        self.boxes = F.interpolate(osd.float()[None, None], size=(h, w), mode="nearest")[0, 0] > 0
+        # Where the OSD can be, at the output size (``osd``: a bool mask, or how much of each
+        # pixel is OSD, 0..1, fading out around it); per frame only its strokes are kept.
+        mode = "nearest" if osd.dtype == torch.bool else "bilinear"
+        self.area = F.interpolate(osd.float()[None, None], size=(h, w), mode=mode)[0, 0]
+        self.boxes = self.area > 0
+        self.osd_scale = h / osd.shape[0]  # output pixels per source pixel
         self.steady = steady
         self.redraw = redraw  # the experimental OSD redraw (osd.for_clip), or None
         self.win: deque[Frame] = deque()
@@ -124,6 +131,8 @@ class Remaster:
     def push(self, f: Frame) -> list[Tensor]:
         """Add the next cleaned frame; returns the frames that are now finished (packed)."""
         f.index = self.count
+        if f.osd is None:
+            f.strokes = self._strokes(f.y)
         self.count += 1
         self.win.append(f)
         out = []
@@ -173,9 +182,37 @@ class Remaster:
         chroma = win[c].u.abs() + win[c].v.abs()
         colourful = F.interpolate(chroma[None, None], size=y.shape, mode="nearest")[0, 0] > 0.08
         bright = y > 0.72
-        core = (bright | (still & colourful)) & self.boxes
+        area = self._shown(win, c)
+        core = (bright | (still & colourful)) & (area > 0)
         grown = F.max_pool2d(core.float()[None, None], 3, 1, 1)[0, 0]
-        return ops.gaussian(grown, 0.8).clamp(0, 1) * self.boxes
+        return ops.gaussian(grown, 0.8).clamp(0, 1) * area
+
+    def _strokes(self, y: Tensor) -> Tensor:
+        """(H, W) 1 within reach of an OSD stroke (bright, with a dark outline) in ``y``."""
+        glyph = PictureConfig()
+        darkest = -F.max_pool2d(-y[None, None], 5, 1, 2)[0, 0]
+        strokes = (y >= glyph.glyph_level / 255) & (darkest < y - glyph.glyph_outline / 255)
+        reach = max(1, round((OSD_SHOWN_REACH + OSD_FEATHER) * self.osd_scale))
+        return ops.dilate(strokes.half(), reach)
+
+    def _shown(self, win: list[Frame], c: int) -> Tensor:
+        """The OSD area where the OSD shows around frame ``c`` (a stroke in it or its
+        neighbours): the area covers every element ever shown, and a still, colourful
+        object under one that is not shown now (a propeller guard under the flight timer
+        during a menu) is the picture, graded like the rest. The cleaner's own judgement,
+        when the frame carries it."""
+        given = win[c].osd
+        if given is not None:
+            shown = given.float()[None, None]
+            return F.interpolate(shown, size=(self.h, self.w), mode="bilinear")[0, 0]
+        near = torch.stack(
+            [
+                self._strokes(f.y) if f.strokes is None else f.strokes
+                for f in win[max(0, c - RADIUS) : c + RADIUS + 1]
+            ]
+        ).amax(0)
+        feather = max(1, round(OSD_FEATHER * self.osd_scale))
+        return self.area * ops.box_mean(near.float(), 2 * feather + 1)
 
     def process(self, win: list[Frame], c: int) -> Tensor:
         import time

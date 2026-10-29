@@ -57,8 +57,8 @@ class LearnedRestorer:
     def _run(self, stack: Tensor, osd: Tensor | None) -> Tensor:
         """stack: (5, 3, H, W) YUV in [0, 1], neighbours already warped onto frame 2.
 
-        osd: (H, W) bool at the output size, True = OSD; those pixels keep the centre frame
-        (upscaled like the network's output when it upscales).
+        osd: (H, W) at the output size, how much of each pixel is OSD (bool or 0..1); OSD
+        pixels keep the centre frame (upscaled like the network's output when it upscales).
         Any size: the network needs multiples of 8, so the edges are repeated up to that.
         """
         h, w = stack.shape[-2:]
@@ -75,5 +75,5 @@ class LearnedRestorer:
         if self.strength != 1.0:
             out = centre + self.strength * (out - centre)
         if osd is not None:
-            out = torch.where(osd.unsqueeze(0), centre, out)
+            out = torch.lerp(out, centre, osd.unsqueeze(0).to(out.dtype))
         return out.clamp(0.0, 1.0)

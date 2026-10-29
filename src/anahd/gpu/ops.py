@@ -99,6 +99,15 @@ def area_half(x: Tensor) -> Tensor:
     return out.reshape(*x.shape[:-2], out.shape[-2], out.shape[-1])
 
 
+def dilate(x: Tensor, r: int) -> Tensor:
+    """(H, W) max over the (2r+1)x(2r+1) square around each pixel (edges: the part
+    inside), as a row pass then a column pass: the same result as one square pass, at
+    a small part of its cost for a large ``r``."""
+    k = 2 * r + 1
+    rows = F.max_pool2d(x[None, None], (1, k), 1, (0, r))
+    return F.max_pool2d(rows, (k, 1), 1, (r, 0))[0, 0]
+
+
 def dilate3(x: Tensor) -> Tensor:
     return F.max_pool2d(_batch(x), 3, stride=1, padding=1).reshape(x.shape)
 

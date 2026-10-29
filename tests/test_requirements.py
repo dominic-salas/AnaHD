@@ -356,8 +356,9 @@ def test_app_worker_cleans_a_clip_and_finds_the_picture_area(qapp: object, tmp_p
     got = wait_for(runner.finished, 180)
     assert not failures, failures
     assert got, "the worker did not finish in 3 minutes"
-    frames, _took, crop, _notes = got[0][1]  # type: ignore[index]
+    frames, _took, crop, _notes, gpu = got[0][1]  # type: ignore[index]
     assert frames == 90
+    assert isinstance(gpu, str) and gpu, "the worker did not name the GPU it cleaned on"
     x, y, w, h = crop
     assert abs(x - syn.PIC_X) <= 4 and abs(w - syn.PIC_W) <= 8 and y <= 4 and h >= 712
     assert out.is_file() and not runner.busy
