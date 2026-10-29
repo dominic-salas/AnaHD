@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Frames go to the GPU from pinned memory without a blocking copy: about 1% faster, and
+  the output is the same, bit for bit.
+
 ## 0.1.2 (2026-10-28)
 
 - **Watch the clean as it happens.** While a clip is cleaned, the preview shows the frame
