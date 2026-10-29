@@ -1,5 +1,23 @@
 # TODOS
 
+## Cleaning
+
+### Rectangular boxes in still scenes (found 2026-10-28)
+
+**What:** Faint lighter or darker rectangles in the cleaned output where the scene doesn't move: on the propeller guard and around the holes in the desk in `hdz_30s.mp4` (drone sitting on a desk, DVR menu showing). See `docs/designs/evidence/osd-boxes-hdz30s.png`: output frames 0 and 26, at 2x.
+
+**Why:** This is the kind of artifact the owner has caught before ("noticable boxes behind OSD elements"). It is present in 0.1.1 and in 0.1.2 alike: 0.1.2's output is bit-identical. Likely cause, not yet verified: in a scene that barely moves, still detail is taken for OSD (README, "OSD protection"). OSD pixels keep the current noisy frame, while the area around them is fused from the neighbours, so the edge of the mask's boxes shows.
+
+**Pros:** It would remove a visible flaw from every still moment: menus, landing, waiting on the pad.
+
+**Cons:** Changes the output, so it needs the relative gate and an eye check; the OSD mask is shared with OSD protection and the redraw.
+
+**Context:** Start in `anahd.picture.detect_osd` (how the mask is made) and in the GPU pipeline's OSD protection (where OSD pixels keep the current frame). Check whether the boxes match the mask's tiles. A fix might feather the mask edge, or require the OSD to be bright, edged detail rather than anything that stays still.
+
+**Effort:** M (human) → S (CC+gstack)
+**Priority:** P1
+**Depends on:** none
+
 ## App
 
 ### Play the cleaned output while it renders

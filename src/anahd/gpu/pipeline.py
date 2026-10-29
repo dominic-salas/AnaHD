@@ -66,6 +66,9 @@ class GpuConfig:
     # a small network over the aligned frames at -2..+2. None: the hand-made steps.
     learned: Path | None = None
     learned_strength: float = 1.0  # 0 = the repaired centre frame, 1 = the network's output
+    # Upload frames from pinned memory without a blocking copy, so the host does not wait for
+    # the GPU to drain each frame (the output is the same, bit for bit; 1% faster measured).
+    pinned_upload: bool = True
 
 
 @dataclass
@@ -218,12 +221,18 @@ class Cleaner:
         self._sel_cache: dict[tuple[int, ...], Tensor | slice] = {}
         self._dist_cache: dict[tuple[int, ...], Tensor] = {}
         self._graphs: dict[tuple[object, ...], _Graph] = {}
+        self._pinned: list[Tensor] = []  # sync-free uploads (see _pinned_upload)
+        self._pinned_events: list[torch.cuda.Event | None] = []
+        self._pinned_next = 0
 
     # --- per frame ---
 
     def upload(self, raw: np.ndarray) -> tuple[Tensor, Tensor, Tensor]:
         w, h = self.w, self.h
-        buf = torch.from_numpy(raw).to(self.dev, non_blocking=False).float()
+        if self.gcfg.pinned_upload:
+            buf = self._pinned_upload(raw).float()
+        else:
+            buf = torch.from_numpy(raw).to(self.dev, non_blocking=False).float()
         luma, chroma = w * h, (w // 2) * (h // 2)
         y = buf[:luma].view(h, w)
         u = buf[luma : luma + chroma].view(h // 2, w // 2)
@@ -233,6 +242,29 @@ class Cleaner:
             u = ((u - 128.0) * (255.0 / 224.0) + 128.0).clamp(0, 255).round()
             v = ((v - 128.0) * (255.0 / 224.0) + 128.0).clamp(0, 255).round()
         return y, u, v
+
+    def _pinned_upload(self, raw: np.ndarray) -> Tensor:
+        """``raw`` on the GPU without the host waiting: copied into one of a few pinned
+        buffers, then sent asynchronously. A buffer is refilled only once the copy that
+        last read it has finished (its event), which in practice has long happened."""
+        if not self._pinned or self._pinned[0].numel() != raw.size:
+            self._pinned = [
+                torch.empty(raw.size, dtype=torch.uint8, pin_memory=True)
+                for _ in range(PINNED_SLOTS)
+            ]
+            self._pinned_events = [None] * PINNED_SLOTS
+        i = self._pinned_next
+        self._pinned_next = (i + 1) % PINNED_SLOTS
+        event = self._pinned_events[i]
+        if event is not None:
+            event.synchronize()
+        host = self._pinned[i]
+        host.numpy()[:] = raw.reshape(-1)
+        dev = host.to(self.dev, non_blocking=True)
+        done = torch.cuda.Event()  # type: ignore[no-untyped-call, unused-ignore]
+        done.record()
+        self._pinned_events[i] = done
+        return dev
 
     def prepare(self, raw: np.ndarray) -> Prepared:
         y, u, v = self.upload(raw)
@@ -364,7 +396,9 @@ class Cleaner:
             return self._detect(det, list(offsets), *t)
 
         found = self._run(("detect", offsets), detect, (*args[:8], a.nu, a.nv))
-        rows = bool(found[-1])  # sync: is the row path needed at all?
+        # Is the row path needed at all? Reading that back makes the host wait for the GPU,
+        # but always running the row path instead measured 4% slower (2026-10-28).
+        rows = bool(found[-1])
 
         def fix(*t: Tensor) -> tuple[Tensor, ...]:
             return self._fix(det, list(offsets), rows, *t)
@@ -966,6 +1000,7 @@ Stage = Callable[[str], None]  # what the clean is doing, before the first frame
 # A live picture: the recording's frame and the cleaned one (JPEG), and the output frame's
 # number in this call (from 0).
 Picture = Callable[[bytes, bytes, int], None]
+PINNED_SLOTS = 4  # frames in flight to the GPU on the sync-free upload
 RAW_KEEP = 32  # recent raw frames kept to pair with the output (it lags by the window)
 
 

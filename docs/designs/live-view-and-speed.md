@@ -930,3 +930,32 @@ CEO REVIEW (/plan-ceo-review)
 - **VERDICT:** no review CLEAR. Both reviews are ISSUES OPEN because their findings are mapped into the Build spec as work, with none left unresolved. Eng review required: its status is issues_open (mapped work), not unresolved choices.
 
 NO UNRESOLVED DECISIONS
+
+## Outcome (2026-10-29)
+
+**Part 1 shipped as 0.1.2** (PR #1, tag `v0.1.2`, release published after installing the draft
+over the owner's 0.1.1 and cleaning a clip with it). The output is bit-identical to 0.1.1.
+
+**Part 2, measured** (`tools/ab_speed.py`, `hdz_30s.mp4`, whole pipeline at defaults, 3
+alternating runs each, medians):
+
+| Change | Speed | Output | Decision |
+|---|---|---|---|
+| Always run the row path (no per-frame `rows` sync) | **4.0% slower** | identical | dropped (the row path costs more than the wait) |
+| Pinned, non-blocking upload | 1.1% faster | identical | **kept as the default** |
+| `flow_iters` 6 → 4 (with the pinned upload) | 6.1% faster | changes | **rejected by the gate** |
+
+The relative gate for `flow_iters=4` (`tools/gate.py`, full numbers in
+`docs/designs/evidence/gate-flow-iters-4.json`) failed:
+- texture detail −7% on the 180°/s roll and −5% on the 720°/s flip;
+- roll PSNR −0.13 dB, and −0.1 dB on frames next to a whole-frame outage;
+- still-area pulsing +10% on the owner's dusk flight and +3% on night street.
+
+This is the owner's quality bar at work: softening and pulsing. RAFT stays at 6 iterations.
+
+The speed gain (1.1%) is under the 2% release floor, so **0.2.0 is not cut**. The pinned
+upload is on main for the next release. The tools stay: `tools/ab_speed.py` for A/B speed and
+identity, `tools/gate.py` for the relative gate and the artifact hunt.
+
+Found on the way and logged in TODOS.md (P1): rectangular boxes in still scenes,
+present in 0.1.1 and 0.1.2 alike.
