@@ -838,6 +838,35 @@ def test_a_trailing_picture_after_the_worker_exits_is_not_a_failure(
     assert got["finished"] and not got["failed"]
 
 
+# Regression: ISSUE-001 — Stop pressed while a live picture is being shown turned the
+# stopped clip into "Failed: the worker stopped unexpectedly (exit code -15)"
+# Found by /qa on 2026-10-29
+# Report: .gstack/qa-reports/run-20261029T051405Z/qa-report-anahd-2026-10-29.md
+def test_stopping_from_a_picture_handler_is_not_a_failure(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    r, q, got = _runner(tmp_path)
+
+    class Killable(_AliveProc):
+        alive = True
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def kill(self) -> None:
+            self.alive = False
+
+    r._proc = Killable()  # type: ignore[assignment]
+    r.stage.connect(lambda *a: r.stop())  # Stop pressed while the first signal is handled
+    q.put(("stage", "Cleaning"))
+    q.put(("progress", 30, 100, 20.0, 5.0))
+    q.put(("frame", b"b", b"a", 5, 10))
+    r._poll()
+    assert got["stage"] and not r.busy
+    assert not got["failed"], "a deliberate Stop is not a failure"
+    assert not got["progress"] and not got["frame"], "nothing is reported after Stop"
+
+
 def _pick(window: MainWindow, row: int) -> None:
     """A click: this clip alone is selected."""
     window._list.setCurrentRow(row, QItemSelectionModel.SelectionFlag.ClearAndSelect)
