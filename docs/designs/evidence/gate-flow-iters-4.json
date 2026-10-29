@@ -1,0 +1,245 @@
+{
+ "set": {
+  "flow_iters": 4,
+  "pinned_upload": true
+ },
+ "synthetic": {
+  "off": {
+   "bands.psnr": 27.103155195468887,
+   "bands.band_psnr": 26.92147252346544,
+   "bands.flicker": 1.382447575561317,
+   "osd.box": 0.2977637227376302,
+   "roll.psnr": 29.38886351907721,
+   "roll.detail": 17.98359028117835,
+   "flip.psnr": 27.235282661383533,
+   "flip.detail": 15.98920836376445,
+   "still.pulsing": 1.7328472137451172,
+   "still.pulsing_worst": 9.941704750061035,
+   "outage.frames_psnr": 18.727681311597934,
+   "outage.neighbours_psnr": 27.026209796737415
+  },
+  "on": {
+   "bands.psnr": 27.103802691388537,
+   "bands.band_psnr": 26.94132945492344,
+   "bands.flicker": 1.3887510642944223,
+   "osd.box": 0.29696853637695314,
+   "roll.psnr": 29.26444214104713,
+   "roll.detail": 16.66359937820073,
+   "flip.psnr": 27.321695185797086,
+   "flip.detail": 15.136594514752968,
+   "still.pulsing": 1.7425322532653809,
+   "still.pulsing_worst": 9.95430850982666,
+   "outage.frames_psnr": 23.630924842603264,
+   "outage.neighbours_psnr": 26.93034050593865
+  }
+ },
+ "real": {
+  "day_overcast.mp4": {
+   "mean_abs_diff": 1.1696796211902005,
+   "max_frame_diff": 2.879478202160494,
+   "still_pulsing_off": 1.4712194204330444,
+   "still_pulsing_on": 1.4947178363800049,
+   "still_worst_off": 2.0521490573883057,
+   "still_worst_on": 2.0753796100616455
+  },
+  "day_sunny.mp4": {
+   "mean_abs_diff": 1.5005680552876375,
+   "max_frame_diff": 4.758706597222222,
+   "still_pulsing_off": 5.532083034515381,
+   "still_pulsing_on": 5.5176568031311035,
+   "still_worst_off": 8.37591552734375,
+   "still_worst_on": 8.328290939331055
+  },
+  "night_tricks.mp4": {
+   "mean_abs_diff": 1.239104850528335,
+   "max_frame_diff": 6.358401331018518,
+   "still_pulsing_off": 1.7884283065795898,
+   "still_pulsing_on": 1.800346851348877,
+   "still_worst_off": 2.6456196308135986,
+   "still_worst_on": 2.6985373497009277
+  },
+  "urban.mp4": {
+   "mean_abs_diff": 1.3128529905049726,
+   "max_frame_diff": 5.043691165123457,
+   "still_pulsing_off": 1.0379468202590942,
+   "still_pulsing_on": 1.049620509147644,
+   "still_worst_off": 2.0524044036865234,
+   "still_worst_on": 2.048143148422241
+  },
+  "night_street.mp4": {
+   "mean_abs_diff": 1.1429010342989112,
+   "max_frame_diff": 3.2351466049382718,
+   "still_pulsing_off": 1.2576453685760498,
+   "still_pulsing_on": 1.300048589706421,
+   "still_worst_off": 1.4390861988067627,
+   "still_worst_on": 1.4721192121505737
+  },
+  "playground.mp4": {
+   "mean_abs_diff": 1.548275480377658,
+   "max_frame_diff": 5.3303988233024695,
+   "still_pulsing_off": 2.1939597129821777,
+   "still_pulsing_on": 2.1855926513671875,
+   "still_worst_off": 5.748783111572266,
+   "still_worst_on": 5.707287788391113
+  },
+  "rooftops.mp4": {
+   "mean_abs_diff": 1.1696796211902005,
+   "max_frame_diff": 2.879478202160494,
+   "still_pulsing_off": 1.4712194204330444,
+   "still_pulsing_on": 1.4947178363800049,
+   "still_worst_off": 2.0521490573883057,
+   "still_worst_on": 2.0753796100616455
+  },
+  "dusk.mp4": {
+   "mean_abs_diff": 1.3842383502389832,
+   "max_frame_diff": 12.520398341049383,
+   "still_pulsing_off": 1.5308723449707031,
+   "still_pulsing_on": 1.690812587738037,
+   "still_worst_off": 2.366438627243042,
+   "still_worst_on": 2.434375524520874
+  }
+ },
+ "pass": false,
+ "checks": [
+  {
+   "metric": "bands.psnr",
+   "off": 27.103155195468887,
+   "on": 27.103802691388537,
+   "pass": true,
+   "rule": "on >= off - 0.05 dB"
+  },
+  {
+   "metric": "bands.band_psnr",
+   "off": 26.92147252346544,
+   "on": 26.94132945492344,
+   "pass": true,
+   "rule": "on >= off - 0.05 dB"
+  },
+  {
+   "metric": "bands.flicker",
+   "off": 1.382447575561317,
+   "on": 1.3887510642944223,
+   "pass": true,
+   "rule": "on <= off x 1.02"
+  },
+  {
+   "metric": "osd.box",
+   "off": 0.2977637227376302,
+   "on": 0.29696853637695314,
+   "pass": true,
+   "rule": "on - off <= 1.0"
+  },
+  {
+   "metric": "roll.psnr",
+   "off": 29.38886351907721,
+   "on": 29.26444214104713,
+   "pass": false,
+   "rule": "on >= off - 0.05 dB"
+  },
+  {
+   "metric": "roll.detail",
+   "off": 17.98359028117835,
+   "on": 16.66359937820073,
+   "pass": false,
+   "rule": "on >= off x 0.98"
+  },
+  {
+   "metric": "flip.psnr",
+   "off": 27.235282661383533,
+   "on": 27.321695185797086,
+   "pass": true,
+   "rule": "on >= off - 0.05 dB"
+  },
+  {
+   "metric": "flip.detail",
+   "off": 15.98920836376445,
+   "on": 15.136594514752968,
+   "pass": false,
+   "rule": "on >= off x 0.98"
+  },
+  {
+   "metric": "still.pulsing",
+   "off": 1.7328472137451172,
+   "on": 1.7425322532653809,
+   "pass": true,
+   "rule": "on <= off x 1.02"
+  },
+  {
+   "metric": "still.pulsing_worst",
+   "off": 9.941704750061035,
+   "on": 9.95430850982666,
+   "pass": true,
+   "rule": "on <= off x 1.05"
+  },
+  {
+   "metric": "outage.frames_psnr",
+   "off": 18.727681311597934,
+   "on": 23.630924842603264,
+   "pass": true,
+   "rule": "on >= off - 0.05 dB"
+  },
+  {
+   "metric": "outage.neighbours_psnr",
+   "off": 27.026209796737415,
+   "on": 26.93034050593865,
+   "pass": false,
+   "rule": "on >= off - 0.05 dB"
+  },
+  {
+   "metric": "real day_overcast.mp4 pulsing",
+   "off": 1.4712194204330444,
+   "on": 1.4947178363800049,
+   "pass": true,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real day_sunny.mp4 pulsing",
+   "off": 5.532083034515381,
+   "on": 5.5176568031311035,
+   "pass": true,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real night_tricks.mp4 pulsing",
+   "off": 1.7884283065795898,
+   "on": 1.800346851348877,
+   "pass": true,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real urban.mp4 pulsing",
+   "off": 1.0379468202590942,
+   "on": 1.049620509147644,
+   "pass": true,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real night_street.mp4 pulsing",
+   "off": 1.2576453685760498,
+   "on": 1.300048589706421,
+   "pass": false,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real playground.mp4 pulsing",
+   "off": 2.1939597129821777,
+   "on": 2.1855926513671875,
+   "pass": true,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real rooftops.mp4 pulsing",
+   "off": 1.4712194204330444,
+   "on": 1.4947178363800049,
+   "pass": true,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  },
+  {
+   "metric": "real dusk.mp4 pulsing",
+   "off": 1.5308723449707031,
+   "on": 1.690812587738037,
+   "pass": false,
+   "rule": "on <= off x 1.02, worst x 1.05"
+  }
+ ]
+}
