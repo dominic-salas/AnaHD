@@ -34,6 +34,18 @@
 **Priority:** P2
 **Depends on:** its own design and plan review
 
+### Static in the OSD's place on frames torn by interference (card-0038, 2026-10-29)
+
+**What:** On a frame torn by interference (picture rolled, part of it static), the OSD's own spots keep the static: stroke-shaped patches of snow where the readouts sit (`noclock_2026-10-29_card-0038.mp4` frame 225). 0.1.2 showed whole rectangles of snow there; 0.1.3's patches are smaller but still visible.
+
+**Why:** The OSD keeps the plain frame wherever it shows, and snow looks like OSD strokes to the detector (bright specks with dark neighbours), so a torn frame counts as showing its OSD.
+
+**Context:** Deciding presence from the repaired centre alone, not the whole window, changed nothing on frame 225 and cleaned a damaged readout away on dusk.mp4 frame 47, so it was reverted. A fix needs a stroke test that tells text from snow (e.g. the strokes must match the mask's own shape, or the frame's chroma noise there must be low).
+
+**Effort:** M (human) → S (CC+gstack)
+**Priority:** P3
+**Depends on:** none
+
 ## Completed
 
 - **`--cut` error names an internal function**: Done 2026-10-29 (0.1.3): the error now ends "a cut is START-END in seconds or m:ss, e.g. 0-4.5 or 1:05-1:20".
