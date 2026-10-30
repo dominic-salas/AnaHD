@@ -322,4 +322,5 @@ NO UNRESOLVED DECISIONS
   pixels, 99.5% of `hdz_30s.mp4`'s per-frame strokes. The owner's named eye-check clip is
   still open; `hdz_30s.mp4`, `dusk.mp4`, `night_street.mp4`, `playground.mp4` and
   `sunny.mp4` were eye-checked.
-- **TODO items 11, 13, 14** shipped; 12 and 15 closed; 16 deferred. Wave 2 not built.
+- **TODO items 11, 13, 14** shipped; 12 and 15 closed; 16 deferred.
+- **Wave 2, measured before building:** no gain. LK box filter: 1.125 ms per iteration today vs 1.147 ms (grouped 5x5 conv) and 1.298 ms (separable conv). fp16 warp: 0.995 vs 1.000 ms. Neither was built. With the shipped gain at ~0%, Approach C (TODOS.md) is the next design, as this doc's distribution plan says.
