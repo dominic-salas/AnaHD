@@ -2,18 +2,6 @@
 
 ## Cleaning
 
-### Wave 2 speed levers (LK box filter, fp16 warp/blend)
-
-**What:** Levers 8 and 9 of docs/designs/faster-cleaning-and-todos.md, each through the gate.
-
-**Why:** 0.1.3 shipped Wave 1 (+2.3%, identical output) and the box fix, which costs about 1.6% back (the per-frame check of which OSD elements show): 0.1.3 is about as fast as 0.1.2. The 20% goal needs these.
-
-**Effort:** M (human) → S (CC+gstack)
-**Priority:** P2
-**Depends on:** 0.1.3
-
-## App
-
 ### Play the cleaned output while it renders
 
 **What:** Write the `.partial.mp4` as fragmented MP4 so the Results player can play the cleaned flight up to wherever the render has reached.
@@ -40,11 +28,11 @@
 
 **Cons:** Native runtimes inside the PyInstaller installer; TensorRT engines are built per GPU architecture, so it needs a build cache, a first-run cost and a PyTorch fallback.
 
-**Context:** Approach C plus lever 6, deferred in the 2026-10-29 plan reviews. Reopen if the shipped gain stays under 20% (503 s to 402 s or less).
+**Context:** Approach C plus lever 6, deferred in the 2026-10-29 plan reviews. Reopened 2026-10-29: 0.1.3 cleans at 0.1.2's speed, and Wave 2's levers measured no gain (below), so this is the remaining route to the 20% goal (503 s to 402 s or less). Needs its own design (Triton and TensorRT inside the PyInstaller installer, per-GPU engines) before any build.
 
 **Effort:** L (human) → M (CC+gstack)
-**Priority:** P3
-**Depends on:** waves 1-3 of the faster-cleaning plan shipped
+**Priority:** P2
+**Depends on:** its own design and plan review
 
 ## Completed
 
@@ -54,3 +42,4 @@
 - **Live caption total counts packets, not frames**: Closed, won't do (2026-10-29): off by one frame at most; the decoded count would cost an extra probe.
 - **5-second motion check before committing**: Closed, won't do (2026-10-29): the live view shows motion a minute in, with Stop under it.
 - **Rectangular boxes in still scenes**: Fixed 2026-10-29 (0.1.3): the OSD mask is the OSD's own strokes, the switch to the cleaned picture is feathered, and an element keeps the plain frame only while it shows. Evidence: docs/designs/evidence/osd-boxes-fixed-hdz30s.jpg.
+- **Wave 2 speed levers (LK box filter, fp16 warp/blend)**: Closed 2026-10-29, measured no gain before any gate run. LK refine's two separable avg_pool2d passes take 1.125 ms per iteration on the real (6, 5, 720, 956) fp16 tensor; one grouped 5x5 conv over a count map takes 1.147 ms, a separable grouped conv 1.298 ms. The warp's four grid_samples take 0.995 ms in fp32 and 1.000 ms in fp16 (index arithmetic, not memory, is the cost); the fp16 blend only touches the Classic path.
