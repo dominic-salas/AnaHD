@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from anahd import __version__, bundle
-from anahd.app import theme
+from anahd.app import theme, windowchrome
 from anahd.app.cliplist import (
     DETAILS,
     PATH,
@@ -307,6 +307,7 @@ class MainWindow(QMainWindow):
         top.addSpacing(12)
         top.addWidget(self._theme_button)
         top.addWidget(quit_button)
+        windowchrome.attach(self, header)
 
         # Empty: one big drop target that says what to do.
         self._drop_zone = Page()
