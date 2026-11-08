@@ -48,7 +48,7 @@ OTHERS = (
     ),
     ("Inno Setup", "Inno Setup licence (permissive)", "Makes the installer"),
     (
-        "Space Grotesk and Geist Mono fonts",
+        "Instrument Sans and Geist Mono fonts",
         "SIL Open Font License 1.1",
         "The app's typefaces (as on dvsalas.com); licence texts in anahd/app/fonts",
     ),
