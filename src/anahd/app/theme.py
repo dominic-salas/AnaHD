@@ -14,6 +14,8 @@ from pathlib import Path
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
+from anahd.app import titlebar
+
 FONTS = Path(__file__).parent / "fonts"
 
 
@@ -121,6 +123,7 @@ def apply(app: QApplication, palette: Palette, fonts: Fonts) -> None:
     sans.setPointSizeF(10)
     app.setFont(sans)
     app.setStyleSheet(stylesheet(palette, fonts))
+    titlebar.install(app, titlebar.TitleColours(palette.bg, palette.text, palette.border))
 
 
 def stylesheet(p: Palette, fonts: Fonts) -> str:
