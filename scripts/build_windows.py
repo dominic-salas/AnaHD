@@ -138,7 +138,7 @@ def copy_licences(target: Path, ffmpeg_licence: str | None) -> None:
         "- PyTorch and torchvision (BSD-3-Clause) with NVIDIA's CUDA runtime libraries "
         "(NVIDIA's licence terms, redistributed as PyTorch ships them)\n"
         "- RAFT-small optical-flow weights from torchvision (BSD-3-Clause)\n"
-        "- The Space Grotesk and Geist Mono fonts (SIL Open Font License 1.1; texts in "
+        "- The Instrument Sans and Geist Mono fonts (SIL Open Font License 1.1; texts in "
         "_internal/anahd/app/fonts)\n"
         "- NumPy (BSD-3-Clause), OpenCV (Apache-2.0)\n"
         "- The AnaHD restorer weights (MIT), trained with SeedVR2 (Apache-2.0) as teacher\n"

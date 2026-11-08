@@ -1,8 +1,8 @@
 """The app's look, after dvsalas.com: charcoal (or warm off-white) surfaces, thin
-borders, Space Grotesk text with small Geist Mono labels, one amber accent.
+borders, Instrument Sans text with small Geist Mono labels, one amber accent.
 
 Colours are tokens in a palette per theme, named as on the site; `stylesheet` turns a
-palette into Qt style sheet rules. Fonts: Space Grotesk, Geist Mono and Doto from
+palette into Qt style sheet rules. Fonts: Instrument Sans, Geist Mono and Doto from
 ``fonts/`` (SIL Open Font License), otherwise Windows' own Segoe UI and Consolas.
 """
 
@@ -79,7 +79,7 @@ def load_fonts() -> Fonts:
         return next((name for name in names if name in families), names[-1])
 
     return Fonts(
-        sans=first("Space Grotesk", "Segoe UI", "Arial"),
+        sans=first("Instrument Sans", "Segoe UI", "Arial"),
         mono=first("Geist Mono", "Cascadia Mono", "Consolas", "Courier New"),
         dot="Doto" if "Doto" in families else None,
     )

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **A new text font.** The app's text is set in Instrument Sans (SIL Open Font License,
+  bundled) instead of the previous face.
+
 ## 0.1.3 (2026-10-29)
 
 - **No more boxes around the OSD.** In still moments (on the pad, in menus, landing) faint
