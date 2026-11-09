@@ -552,6 +552,16 @@ class Cleaner:
             self._slot_cache[key] = m.to(self.dev)
         return self._slot_cache[key]
 
+    def _trust(self, cfg: BreakupConfig, a: Aligned) -> tuple[Tensor, Tensor]:
+        """How far the warped neighbours can be believed: (S, H, W) each one's agreement
+        with their consensus, and (H, W) 0..1 the repair strength that allows. Damage in
+        the centre alone leaves them agreeing with each other; where they do not (the flow
+        lost them in a flip) they are no evidence and no source, so the centre is kept."""
+        agree = 1.0 / (1.0 + ((a.blur - trimmed_mean(a.blur)).abs() / self.cfg.match_sigma) ** 4)
+        seen = a.valid * self._distinct(a)[:, None, None] * a.dist
+        support = (agree * seen).sum(0) / seen.sum(0).clamp_min(1e-6)
+        return agree, ((support - cfg.trust_low) / (cfg.trust_high - cfg.trust_low)).clamp(0, 1)
+
     def _replace_rows(
         self, cy: Tensor, cu: Tensor, cv: Tensor, a: Aligned, m: Tensor
     ) -> tuple[Tensor, Tensor, Tensor]:
@@ -599,8 +609,9 @@ class Cleaner:
         # neighbours agree on rather than as fine detail.
         dev = (cu - trimmed_mean(a.u)).abs() + (cv - trimmed_mean(a.v)).abs()
         m = torch.maximum(m, ((dev - cfg.blotch) / cfg.pixel_soft).clamp(0.0, 1.0) * (floor < 1e3))
-        m = ops.box_mean(ops.dilate3(m), 3) * self.keep_half  # OSD fringes are not snow
-        share = m.mean()
+        agree, trust = self._trust(cfg, a)
+        m = ops.box_mean(ops.dilate3(m), 3) * self.keep_half * ops.area_half(trust)
+        share = m.mean()  # OSD fringes are not snow, hence keep_half
 
         def clean(n: Tensor) -> Tensor:
             return 1.0 / (1.0 + (n / cfg.pixel_noise) ** 4)
@@ -621,8 +632,6 @@ class Cleaner:
 
         mf = full(m)[0]
         qf = full(q) * a.valid
-        ref = trimmed_mean(a.blur)
-        agree = 1.0 / (1.0 + ((a.blur - ref).abs() / self.cfg.match_sigma) ** 4)
         w = qf * agree
         qcf = full(qc)[0]
         den_y = w.sum(0) + qcf + eps
@@ -635,7 +644,7 @@ class Cleaner:
         speck = (cy - ops.median3(cy)).abs()
         far = (cy - tm).abs()
         ms = (torch.minimum(speck - cfg.speck, far - cfg.speck_far) / cfg.pixel_soft).clamp(0, 1)
-        ms = ops.box_mean(ops.dilate3(ms), 3) * self.keep * (a.valid.amin(0) > 0.5)
+        ms = ops.box_mean(ops.dilate3(ms), 3) * self.keep * (a.valid.amin(0) > 0.5) * trust
         cy = cy + (tm - cy) * ms
 
         # The OSD does not move: repair it from the unwarped neighbours clean there. Readouts
