@@ -48,6 +48,10 @@ class BreakupConfig:
     pixel_noise: float = 4.0  # levels of chroma noise at which a source's weight halves
     speck: float = 18.0  # levels a luma speck differs from its 3x3 median...
     speck_far: float = 24.0  # ...and from the neighbours' consensus
+    agree_level: float = 8.0  # levels: a neighbour this close to their consensus agrees
+    row_trust: float = 0.7  # rows where fewer of the neighbours agree are not flagged
+    trust_low: float = 0.5  # share of neighbours agreeing below which a pixel is left alone
+    trust_high: float = 0.8  # ...and at which its repair is at full strength
     osd_margin: float = 8.0  # inside the OSD, damage must exceed the margin by this much
     osd_centre: float = 3.0  # and the centre's own OSD counts this many times more
     blotch: float = 14.0  # levels (|dU| + |dV|) from the neighbours' consensus colour
@@ -66,6 +70,7 @@ class RowSignals:
     disagree: Tensor  # (H,) mean second-smallest luma difference to the neighbours, levels
     snow: Tensor  # (H,) centre's fine horizontal detail over the neighbours' (ratio)
     chroma: Tensor | None = None  # (H,) like disagree, for chroma (|du| + |dv|); scan only
+    support: Tensor | None = None  # (H,) share of the neighbours agreeing with each other
 
 
 class Detector:
@@ -110,7 +115,10 @@ class Detector:
         k = 2 if len(near) >= 2 else 1
 
         ref = ops.gaussian(cy, 1.2, size=(5, 5))
-        diff = (ops.gaussian(wy, 1.2, size=(5, 5)) - ref).abs()
+        blurred = ops.gaussian(wy, 1.2, size=(5, 5))
+        agreeing = ((blurred - trimmed_mean(blurred)).abs() < self.cfg.agree_level) & (valid >= 0.5)
+        support = self._rows(agreeing.float().mean(0))
+        diff = (blurred - ref).abs()
         diff = torch.where((valid < 0.5) | missing, FAR, diff)
         d = second_smallest(diff) if k == 2 else diff.amin(0)
         disagree = self._rows(torch.where(d >= FAR, 0.0, d))
@@ -129,7 +137,7 @@ class Detector:
             return g.sum(-1) / self.count_hf
 
         snow = hf(cy) / hf(wy).median(0).values.clamp_min(0.5)
-        return RowSignals(disagree, snow, crows)
+        return RowSignals(disagree, snow, crows, support)
 
     def saturation(self, u: Tensor, v: Tensor) -> Tensor:
         """Mean chroma distance from grey outside the OSD: (H/2, W/2) -> (), or batched."""
@@ -160,6 +168,10 @@ def flag_rows(s: RowSignals, cfg: BreakupConfig) -> Tensor:
     flags |= (snow > cfg.heavy_snow) & (dis > (cfg.heavy_ratio * base).clamp_min(cfg.heavy_level))
     whole = (median > cfg.whole_level) & (s.snow.median() > cfg.whole_snow)
     whole = whole | (flags.float().mean() > cfg.whole)
+    if s.support is not None:
+        # A centre disagreeing with neighbours that also disagree with each other shows only
+        # that the flow lost them (a flip): that says nothing about damage.
+        flags = flags & (smooth_rows(s.support, cfg.smooth) >= cfg.row_trust)
     return flags | whole
 
 
