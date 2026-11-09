@@ -70,6 +70,16 @@ def window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
     win._shutdown()
 
 
+def test_embedded_window_leaves_the_frame_to_its_host(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANAHD_EMBEDDED", "1")
+    win = MainWindow(QSettings(str(tmp_path / "s.ini"), QSettings.Format.IniFormat))
+    assert win._logo.isHidden() and win._theme_button.isHidden()
+    assert not win._tray.isVisible()
+    win._quit_now()
+
+
 def test_videos_in_folders_skips_outputs_and_other_files(tmp_path: Path) -> None:
     for name in ("a.mp4", "b.TS", "AnaHD_a.mp4", "old_anahd.mp4", "notes.txt"):
         (tmp_path / name).write_bytes(b"x")
