@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-11-08)
 
+- **Fast flips no longer lose picture.** Repair compared each frame with neighbouring
+  frames that could not be lined up during a fast flip, took good picture for damage and
+  replaced it, sometimes with wrong blocks and washed-out colour or OSD text. Repair now
+  needs the neighbouring frames to agree with each other first. In exchange, a little more
+  static can stay in the most heavily damaged bands during fast moves.
+- The window buttons line up with the top bar's own row.
 - **A new text font.** The app's text is set in Instrument Sans (SIL Open Font License,
   bundled) instead of the previous face.
 
