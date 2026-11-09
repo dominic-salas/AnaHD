@@ -222,6 +222,11 @@ def row(*parts: QWidget | int) -> QHBoxLayout:
     return layout
 
 
+def embedded() -> bool:
+    """Whether another app (okFPV) shows this window inside its own."""
+    return os.environ.get("ANAHD_EMBEDDED") == "1"
+
+
 class MainWindow(QMainWindow):
     def __init__(self, settings: QSettings) -> None:
         super().__init__()
@@ -307,7 +312,11 @@ class MainWindow(QMainWindow):
         top.addSpacing(12)
         top.addWidget(self._theme_button)
         top.addWidget(quit_button)
-        windowchrome.attach(self, header)
+        if embedded():  # the host window has the name, the theme and the window buttons
+            for item in (logo, self._theme_button, quit_button):
+                item.hide()
+        else:
+            windowchrome.attach(self, header)
 
         # Empty: one big drop target that says what to do.
         self._drop_zone = Page()
@@ -507,7 +516,8 @@ class MainWindow(QMainWindow):
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._tray_clicked)
         self._tray.messageClicked.connect(self.bring_back)
-        self._tray.show()
+        if not embedded():
+            self._tray.show()
 
     def _apply_theme(self, name: str) -> None:
         palette = theme.THEMES.get(name, theme.DARK)
@@ -1347,6 +1357,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._settings.setValue("geometry", self.saveGeometry())
+        if self._runner.busy and not self._quitting and embedded():
+            event.ignore()  # the host is closing: ask, and there is no tray to hide in
+            if self._may_stop():
+                self._quit_now()
+            return
         if self._runner.busy and not self._quitting:
             # Keep cleaning in the background; the tray icon brings the window back.
             event.ignore()
@@ -1365,6 +1380,10 @@ class MainWindow(QMainWindow):
 
     def _quit(self) -> None:
         """The Quit button and the tray's Quit: ask first if a clip is being cleaned."""
+        if self._may_stop():
+            self._quit_now()
+
+    def _may_stop(self) -> bool:
         if self._runner.busy:
             self.bring_back()
             answer = QMessageBox.question(
@@ -1373,9 +1392,8 @@ class MainWindow(QMainWindow):
                 "A clip is still being cleaned. Stop it and quit? The unfinished output is "
                 "removed; your recordings are not touched.",
             )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-        self._quit_now()
+            return bool(answer == QMessageBox.StandardButton.Yes)
+        return True
 
     def _quit_now(self) -> None:
         """The only way out of the app, reached from a user action only (X with nothing
@@ -1408,5 +1426,9 @@ def run(argv: Sequence[str]) -> int:
     # Recordings dropped on the shortcut open on the clips page, to be checked and cut
     # before CLEAN (they are not cleaned straight away).
     window.add_paths([Path(arg) for arg in argv[1:]])
+    if embedded():
+        window.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        window.move(-32000, -32000)  # off the desktop until the host takes it in
+        window._apply_theme(os.environ.get("ANAHD_THEME", "dark"))
     window.show()
     return app.exec()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5 (2026-11-09)
+
+- **AnaHD can open inside okFPV.** okFPV's AnaHD tab now shows AnaHD in its own window,
+  without a second title bar. On its own, AnaHD is unchanged.
+
 ## 0.1.4 (2026-11-08)
 
 - **Fast flips no longer lose picture.** Repair compared each frame with neighbouring
