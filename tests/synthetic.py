@@ -238,9 +238,14 @@ def wide_truth(i: int) -> NDArray[np.uint8]:
 
 
 def degrade(
-    truth: NDArray[np.uint8], layout: Layout, rng: np.random.Generator, band: bool
+    truth: NDArray[np.uint8],
+    layout: Layout,
+    rng: np.random.Generator,
+    band: bool,
+    lines: int | None = None,
 ) -> NDArray[np.uint8]:
-    """What the DVR stores for a clean frame: reduced, softened, noisy, maybe a band."""
+    """What the DVR stores for a clean frame: reduced, softened, noisy, maybe a band.
+    ``lines``: the analog signal's own line count (480), upscaled to the DVR's picture."""
     w, h = layout.pic_w, layout.pic_h
     pic = cv2.resize(truth, (w, h), interpolation=cv2.INTER_AREA)
     pic = cv2.GaussianBlur(pic.astype(np.float32), (0, 0), sigmaX=1.0, sigmaY=0.5)
@@ -253,6 +258,9 @@ def degrade(
         ycc[r0:r1, :, 0] = rng.uniform(20, 235, (r1 - r0, w))
         ycc[r0:r1, :, 1:] = rng.uniform(60, 200, (r1 - r0, w, 2))
     pic8 = cv2.cvtColor(np.clip(ycc, 0, 255).astype(np.uint8), cv2.COLOR_YCrCb2BGR)
+    if lines is not None:  # the noise is in the signal too, so it is band-limited as well
+        small = cv2.resize(pic8, (w * lines // h, lines), interpolation=cv2.INTER_AREA)
+        pic8 = cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
     frame = np.zeros((layout.dvr_h, layout.dvr_w, 3), np.uint8)
     frame[: layout.pic_h, layout.pic_x : layout.pic_x + w] = pic8
     return frame
@@ -267,10 +275,11 @@ def write_with(
     fps: int = FPS,
     sar: str | None = None,
     mjpeg: bool = False,
+    lines: int | None = None,
 ) -> Clip:
     """Encode a recording of ``truth`` (no breakup bands) like :func:`write`. ``sar``
     tags the pixel shape (e.g. "10/11"); ``mjpeg`` records like older analog DVRs: MJPEG
-    in 4:2:2, full range."""
+    in 4:2:2, full range; ``lines``: see :func:`degrade`."""
     rng = np.random.default_rng(1)
     cmd = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24"]
     cmd += ["-s", f"{layout.dvr_w}x{layout.dvr_h}", "-r", str(fps), "-i", "-"]
@@ -284,7 +293,7 @@ def write_with(
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     assert proc.stdin is not None
     for i in range(frames):
-        proc.stdin.write(degrade(truth(i), layout, rng, band=False).tobytes())
+        proc.stdin.write(degrade(truth(i), layout, rng, band=False, lines=lines).tobytes())
     proc.stdin.close()
     if proc.wait() != 0:
         raise RuntimeError("ffmpeg could not write the synthetic clip")

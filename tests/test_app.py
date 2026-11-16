@@ -46,6 +46,7 @@ from anahd.app.window import (
     CLIPS_PAGE,
     DONE,
     RESULTS_PAGE,
+    WAITING,
     Clip,
     MainWindow,
     videos_in,
@@ -551,6 +552,37 @@ def test_digital_looking_clips_are_left_out_until_included(
     assert not c.skip and window._start.isEnabled()
     window._start_all()
     assert started and started[0][0] == c.path
+
+
+def test_hdzero_clips_are_cleaned_on_the_digital_path_unless_set_to_analog(
+    window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from anahd import cli
+    from anahd.origin import HDZERO_NOTE, Origin
+
+    started: list[tuple[object, ...]] = []
+    monkeypatch.setattr(window._runner, "start", lambda *a: started.append(a))
+    c = _clip(window, tmp_path)
+    window._list.setCurrentRow(0)
+    window._reader.checked.emit(c.path, Origin(True, 0.02, True))
+    assert not c.skip and c.item.data(STATUS) == HDZERO_NOTE  # not left out
+    assert window._start.isEnabled() and window._as_analog.isVisibleTo(window)
+    assert not window._include.isVisibleTo(window)
+    window._start_all()
+    assert started[0][-1] is True  # --digital
+    args = cli._parser().parse_args(worker.cli_args(str(c.path), [], digital=True))
+    assert args.digital is True
+    # The override: cleaned as analog, and the button goes away.
+    window._set_status(c, "Waiting")
+    c.state = WAITING
+    started.clear()
+    window._clean_as_analog()
+    assert c.as_analog and not window._as_analog.isVisibleTo(window)
+    window._start_all()
+    assert started[0][-1] is False  # --analog
+    args = cli._parser().parse_args(worker.cli_args(str(c.path), [], digital=False))
+    assert args.digital is False
+    assert cli._parser().parse_args(worker.cli_args(str(c.path), [])).digital is None
 
 
 def test_analog_clips_are_not_left_out(window: MainWindow, tmp_path: Path) -> None:

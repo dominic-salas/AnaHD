@@ -19,6 +19,17 @@
   the Learned cleaning was not trained on (it smears fine detail such as bare branches), so
   the app says Classic may keep fine detail better. It only suggests; nothing is switched.
 - The README's before/after pictures are regenerated from the 1440-line output.
+- **HDZero recordings are upscaled, not left out.** A recording judged HDZero skips the
+  analog repair and cleaning (no alignment, no breakup repair, no restorer, no C03 lens or
+  analog colour corrections) and keeps the 2x upscale to 1440 lines and the default look.
+  The clip list says "HDZero digital recording: upscaled without analog cleaning", and
+  "Clean as analog" (or `--analog` on the command line) cleans it the old way. `--digital`
+  forces the new path.
+- **HDZero at 720p60 is recognised from the picture.** An HDZero recording and an analog
+  DVR file are both 1280x720 at 60 fps, so the picture decides: HDZero carries detail close
+  to the pixel grid, an analog picture is band-limited. Checked on labelled recordings; it
+  is tuned to call no analog flight digital, so a dark or blurry HDZero clip can still be
+  cleaned as analog.
 
 ## 0.2.0 (2026-11-16)
 
