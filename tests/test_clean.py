@@ -81,8 +81,11 @@ def test_windows_give_every_frame_its_neighbours() -> None:
 def test_output_keeps_the_pictures_shape() -> None:
     from anahd.media import Crop
 
-    assert output_size(Crop(162, 0, 956, 720)) == (1440, 1080)
-    assert output_size(Crop(0, 0, 1280, 720)) == (1920, 1080)
+    assert output_size(Crop(162, 0, 956, 720)) == (1920, 1440)
+    assert output_size(Crop(160, 0, 960, 720), frame=(1280, 720)) == (1920, 1440)
+    assert output_size(Crop(0, 0, 1280, 720)) == (2560, 1440)
+    # a 16:9 DVR frame with the analog line's blanking at the sides is still 16:9
+    assert output_size(Crop(40, 0, 1200, 720), frame=(1280, 720)) == (2560, 1440)
 
 
 def test_tone_curve_is_monotonic_and_sharpening_does_not_overshoot() -> None:

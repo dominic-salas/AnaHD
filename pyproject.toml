@@ -15,13 +15,15 @@ dependencies = [
     # supplies RAFT-small and its weights. The learned restorer is plain PyTorch.
     "torch>=2.5",
     "torchvision>=0.20",
+    "triton-windows>=3.6,<3.7; sys_platform == 'win32'",  # torch.compile; bundles its own C compiler
+    "spandrel>=0.4",                    # loads the SPAN 2x upscaler (classic path's default)
 ]
 
 [project.optional-dependencies]
 # The desktop app (anahd-app). Qt for Python, LGPL-3.0, used as an unmodified library.
 app = ["PySide6-Essentials>=6.10"]
-# --no-learned --ai: spandrel loads the SPAN upscaler; TensorRT runs it fast enough.
-ai = ["spandrel>=0.4", "onnx>=1.16", "tensorrt-cu12>=10"]
+# Optional speed-up: TensorRT runs the upscaler (and the restorer) faster than PyTorch.
+ai = ["onnx>=1.16", "tensorrt-cu12>=10"]
 # Retraining only (anahd.learn): what the SeedVR2 teacher CLI needs. The SeedVR2 code and
 # its weights are an outside checkout; anahd itself never imports any of this.
 train = [

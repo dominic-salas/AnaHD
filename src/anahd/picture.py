@@ -208,10 +208,27 @@ ASPECT_SNAP = 0.03  # a detected picture within 3 % of a standard shape is that 
 SD_SIZES = ((720, 480), (704, 480), (720, 576), (704, 576))  # analog SD storage
 
 
+WIDE_BLANKING = 0.9  # a 16:9 DVR frame's picture is at least this share of its width
+
+
+def _is_wide_dvr_frame(crop: Crop, sar: float, frame: tuple[int, int] | None) -> bool:
+    """A 16:9 DVR frame whose picture is cropped a little at the sides: the DVR samples the
+    analog line's blanking (about 40 px each side of 1280), but the camera's picture fills
+    the active line and the goggles show it as 16:9."""
+    if frame is None or sar != 1.0:
+        return False
+    fw, fh = frame
+    return (
+        abs(fw / fh / (16 / 9) - 1.0) <= ASPECT_SNAP
+        and crop.height == fh
+        and crop.width >= WIDE_BLANKING * fw
+    )
+
+
 def output_size(
-    crop: Crop, height: int = 1080, sar: float = 1.0, frame: tuple[int, int] | None = None
+    crop: Crop, height: int = 1440, sar: float = 1.0, frame: tuple[int, int] | None = None
 ) -> tuple[int, int]:
-    """The picture's own shape at ``height`` lines: 4:3 -> 1440x1080, 16:9 -> 1920x1080.
+    """The picture's own shape at ``height`` lines: 4:3 -> 1920x1440, 16:9 -> 2560x1440.
 
     The shape is the one shown, not the one stored: ``sar`` is the file's pixel shape. SD
     DVRs store a 4:3 picture in 720x480 (NTSC) or 720x576 (PAL) and do not always say so;
@@ -220,6 +237,8 @@ def output_size(
     aspect = crop.width * sar / crop.height
     if sar == 1.0 and frame in SD_SIZES:
         aspect *= (4 / 3) / (frame[0] / frame[1])
+    if _is_wide_dvr_frame(crop, sar, frame):
+        aspect = 16 / 9
     for standard in STANDARD_ASPECTS:
         if abs(aspect / standard - 1.0) <= ASPECT_SNAP:
             aspect = standard

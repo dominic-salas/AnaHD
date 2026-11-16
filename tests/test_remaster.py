@@ -357,6 +357,7 @@ def test_preview_matches_the_same_frame_of_a_full_render(
 
     monkeypatch.setattr(gp._Writer, "put", keep)
     assert cli.main([str(clip.path)]) == 0
+    W, H = 1920, 1440  # the output size: 1440 lines, 4:3
     b = sent[60].float()
     y = (b[: W * H].view(H, W) - 16) / 219
     q = W * H // 4
@@ -373,7 +374,7 @@ def test_preview_matches_the_same_frame_of_a_full_render(
         f"\npreview vs render: mean {diff.mean():.2f}, p99 {np.percentile(diff, 99):.1f}; "
         f"timings cold {pv.timings}, warm {again.timings}"
     )
-    assert pv.result.shape == pv.source.shape == (1080, 1440, 3)
+    assert pv.result.shape == pv.source.shape == (1440, 1920, 3)
     assert diff.mean() < 1.0 and np.percentile(diff, 99) < 8
     assert sum(again.timings.values()) < 1500, "a warm preview takes over 1.5 s"
 
