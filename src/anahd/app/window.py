@@ -68,6 +68,7 @@ from anahd.app.preview import Preview, Wipe
 from anahd.app.remaster_panel import RemasterPanel
 from anahd.app.speed import calibrate, costs, estimate
 from anahd.app.timeline import Timeline, kept_seconds
+from anahd.app.trtnotice import TensorRTNotice
 from anahd.app.worker import Runner
 from anahd.cli import default_output, is_output, part_outputs
 from anahd.cuts import Cut, Span, keep_spans, output_to_source
@@ -498,6 +499,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(header)
+        layout.addWidget(TensorRTNotice(self._settings))
         layout.addWidget(self._pages, 1)
         layout.addWidget(footer)
         self.setCentralWidget(central)
@@ -945,10 +947,15 @@ class MainWindow(QMainWindow):
         if origin.digital and clip.state == WAITING:
             clip.skip = True
             self._set_status(clip, f"Looks digital ({origin.reasons}): left out", problem=True)
+            why = (
+                "The frame rate or picture size matches an HDZero digital recording."
+                if origin.hdzero
+                else "No OSD was found in this recording: analog goggle recordings have "
+                "the OSD burned in, digital ones don't."
+            )
             clip.item.setToolTip(
-                "No OSD was found in this recording: analog goggle recordings have the OSD "
-                "burned in, digital ones don't. AnaHD is made for analog video, so it is "
-                "left out of Clean. Select it and press Include anyway to clean it too."
+                f"{why} AnaHD is made for analog video, so it is left out of Clean. "
+                "Select it and press Include anyway to clean it too."
             )
         self._refresh()
 

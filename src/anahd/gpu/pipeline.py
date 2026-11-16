@@ -14,7 +14,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Iterator
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import cv2
@@ -38,8 +38,9 @@ from anahd.gpu.breakup import (
     trimmed_mean,
 )
 from anahd.gpu.device import cuda_device
+from anahd.gpu.engine import compile_available, compile_is_warm
 from anahd.gpu.flow import Encoded, Flow
-from anahd.gpu.upscale import Upscaler, reduce
+from anahd.gpu.upscale import Upscaler, make_upscaler, reduce
 from anahd.look import LookConfig
 from anahd.media import Crop, Encoder, VideoInfo, probe, read_raw
 from anahd.model.infer import LearnedRestorer
@@ -60,7 +61,7 @@ class GpuConfig:
     refine_iters: int = 3
     refine_window: int = 5
     refine_damping: float = 0.5  # (levels/pixel)^2; keeps flat areas from drifting
-    ai: bool = False  # learned 2x upscale (gpu.upscale) instead of Lanczos + sharpening
+    ai: bool = True  # classic path: SPAN 2x upscale (gpu.upscale) instead of Lanczos + sharpening
     repair: bool = False  # replace breakup bands and colour loss from the neighbours
     graphs: bool = True  # replay the repair from CUDA graphs (off: plain eager, for tests)
     breakup: BreakupConfig = field(default_factory=BreakupConfig)
@@ -71,6 +72,12 @@ class GpuConfig:
     # Upload frames from pinned memory without a blocking copy, so the host does not wait for
     # the GPU to drain each frame (the output is the same, bit for bit; 1% faster measured).
     pinned_upload: bool = True
+    # Faster clean step: RAFT's update loop compiled (Triton) and the U-Net on TensorRT (or
+    # compiled). Each falls back to the plain path if it cannot run. None: decided by
+    # enhance() from the clip's length (the first compile of a picture size costs about
+    # 95 s); the Cleaner treats None as off.
+    fast: bool | None = None
+    fast_cold: bool = False  # compile even when this picture size was never compiled here
 
 
 @dataclass
@@ -196,7 +203,9 @@ class Cleaner:
         self.fill = ops.Filler(
             t(cv2.resize(boxes.astype(np.uint8), small, interpolation=nearest) > 0)
         )
-        self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device)
+        warm = compile_is_warm(f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}")
+        compile_flow = gcfg.fast is True and (gcfg.fast_cold or warm)
+        self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device, compile_flow)
         self.curve = t(curve.astype(np.float32))
         ys, xs = torch.meshgrid(
             torch.arange(h, device=device, dtype=torch.float32),
@@ -215,7 +224,6 @@ class Cleaner:
         self.up_linear = ops.Resampler((w, h), size, "linear", device)
         self.up_chroma = ops.Resampler((w // 2, h // 2), (big_w // 2, big_h // 2), "cubic", device)
         self.m709 = to_bt709(info.bt709)
-        self.ai = Upscaler((w, h), device) if gcfg.ai else None
         kr, kb = (0.2126, 0.0722) if info.bt709 else (0.299, 0.114)
         self.rgb_from = torch.from_numpy(_ycc_matrix(kr, kb)).float().to(device)
         self.ycc709 = (
@@ -227,7 +235,14 @@ class Cleaner:
         self.learned: LearnedRestorer | None = None
         if gcfg.learned is not None:
             # Full strength here: the clean-up sliders mix it with the plain frame (_mix).
-            self.learned = LearnedRestorer(gcfg.learned, device, 1.0)
+            self.learned = LearnedRestorer(gcfg.learned, device, 1.0, accelerate=gcfg.fast is True)
+        # The restorer upscales by itself; without it (or at 1x) the SPAN model does, and
+        # Lanczos only when that cannot run.
+        self.ai = (
+            make_upscaler((w, h), device)
+            if gcfg.ai and (self.learned is None or self.learned.scale == 1)
+            else None
+        )
         self._near_cache: dict[tuple[int, ...], list[int | None]] = {}
         self._stats = torch.zeros(6, dtype=torch.long, device=device)  # RepairStats fields
         self._velocity = torch.zeros(2, 2, h, w, device=device)  # last good flow to -1, +1
@@ -753,10 +768,12 @@ class Cleaner:
         bw, bh = self.size
 
         def rs(p: Tensor, h: int, w: int) -> Tensor:
+            if tuple(p.shape) == (h, w):
+                return p
             x = F.interpolate(p[None, None], size=(h, w), mode="bicubic", antialias=True)
             return x[0, 0]
 
-        return rs(y, bh, bw), rs(u, bh // 2, bw // 2), rs(v, bh // 2, bw // 2)
+        return ops.vertical_notch(rs(y, bh, bw)), rs(u, bh // 2, bw // 2), rs(v, bh // 2, bw // 2)
 
     def to_output(self, y: Tensor, u: Tensor, v: Tensor) -> Tensor:
         """Round to 8 bit full range (as the CPU path hands to FFmpeg), then convert to
@@ -1084,6 +1101,19 @@ Stage = Callable[[str], None]  # what the clean is doing, before the first frame
 # A live picture: the recording's frame and the cleaned one (JPEG), and the output frame's
 # number in this call (from 0).
 Picture = Callable[[bytes, bytes, int], None]
+FAST_MIN_SECONDS = 10.0  # shorter clips do not earn back the accelerators' start-up
+FAST_COLD_SECONDS = 540.0  # a first compile (about 95 s) pays back from about 9 minutes
+
+
+def _with_speedups(gcfg: GpuConfig, info: VideoInfo, opts: Options) -> GpuConfig:
+    """Fill in ``fast`` / ``fast_cold`` from the clip's length when they were left open."""
+    if gcfg.fast is not None or gcfg.learned is None:
+        return gcfg
+    seconds = opts.duration if opts.duration is not None else info.duration
+    fast = compile_available() and seconds >= FAST_MIN_SECONDS
+    return replace(gcfg, fast=fast, fast_cold=seconds >= FAST_COLD_SECONDS)
+
+
 PINNED_SLOTS = 4  # frames in flight to the GPU on the sync-free upload
 RAW_KEEP = 32  # recent raw frames kept to pair with the output (it lags by the window)
 
@@ -1108,8 +1138,8 @@ def enhance(
     if opts.steady is not None:
         raise AnaHDError("--steady runs on the CPU only; add --cpu")
     device = cuda_device()
-    gcfg = gcfg or GpuConfig()
     info = probe(src)
+    gcfg = _with_speedups(gcfg or GpuConfig(), info, opts)
     if measured is None:
         say("Measuring the picture area and OSD")
     meas = measured or measure(src, info, opts)

@@ -39,7 +39,13 @@ BLUR_TAPS = 8
 SHADING_U = (10.47, 6.29)
 SHADING_V = (-12.51, 8.1)
 SHADING_SHARE = 0.75
-SUPERVIEW_W = 1920
+
+
+def superview_width(h: int) -> int:
+    """SuperView is 16:9 at the output height: 1920 at 1080 lines, 2560 at 1440."""
+    return round(h * 16 / 9 / 2) * 2
+
+
 SUPERVIEW_CENTRE = 1.05  # horizontal stretch at the centre (1 = natural)
 OSD_OUT = 0.12  # osd_out: extra vertical magnification at the left and right edges
 
@@ -124,7 +130,7 @@ class Remaster:
         self.vignette = 1 - look.vignette * params.vignette / 100 * rr**1.5
         self.lut = build_lut(params, device) if params.look_strength > 0 else None
         self.sv_grid = superview_grid(w, h, params.superview, device)
-        self.out_size = (SUPERVIEW_W, h) if self.sv_grid is not None else (w, h)
+        self.out_size = (superview_width(h), h) if self.sv_grid is not None else (w, h)
 
     # ----- the queue -----
 
@@ -380,12 +386,12 @@ def black_level(rgb: Tensor, amount: float) -> Tensor:
 
 
 def superview_grid(w: int, h: int, mode: str, device: torch.device) -> Tensor | None:
-    """Sampling grid for SuperView at 1920 x h: source x = a*u + (1-a)*u^3, so the centre
+    """Sampling grid for SuperView at 16:9 x h: source x = a*u + (1-a)*u^3, so the centre
     is stretched by SUPERVIEW_CENTRE and the edges take the rest of the 4:3 -> 16:9 widening.
     ``osd_out`` also magnifies the picture vertically towards the left and right edges."""
     if mode == "off":
         return None
-    ow = SUPERVIEW_W
+    ow = superview_width(h)
     u = torch.linspace(-1, 1, ow, device=device)
     a = min(ow / (w * SUPERVIEW_CENTRE), 1.45)
     gx = (a * u + (1 - a) * u**3).view(1, ow).expand(h, ow)

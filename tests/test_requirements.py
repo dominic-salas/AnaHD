@@ -5,10 +5,10 @@ gives. Needs torch and a CUDA GPU; about a minute.
 
 Requirements covered:
 - The product's: the default command needs no flags, writes AnaHD_<stem>.mp4 next to the
-  input, 1440x1080 for a 4:3 picture at the recording's 60 fps, never overwrites without
+  input, 1920x1440 for a 4:3 picture at the recording's 60 fps, never overwrites without
   --force, never modifies the recording, the app's worker process can be stopped and
   leaves nothing behind. Speed is reported, not judged: it depends on the GPU (the target
-  is ~18 fps, 10 min per 3-min flight).
+  is ~15 fps, 12 min per 3-min flight at 1440 lines).
 - Functional: every frame kept, the output plays, noise is removed, detail is kept,
   breakup bands are repaired, the OSD stays legible, flat areas don't flicker, the picture
   area (black bars) is found, a broken input fails cleanly.
@@ -40,7 +40,12 @@ from anahd import cli  # noqa: E402
 
 pytestmark = [pytest.mark.gpu, pytest.mark.slow]
 FRAMES = 300  # 5 s at 60 fps
-SPEED_TARGET_FPS = 184 * 60 / 600  # a 184 s flight within 10 minutes = 18.4 fps
+# Owner, 2026-11-16: "I wanted 1440p resolution to be a target ... adjust things like the 10
+# minute render requirement so that it's more realistic". Measured at 1440 lines on an RTX
+# 4070 Ti, a 4:3 picture cleans at 17.9 to 18.9 fps (30 s clip, start-up included): a 184 s
+# flight within 12 minutes (15.3 fps) leaves about 20 % margin. A 16:9 picture (2560x1440)
+# measured 11.6 to 12.3 fps, about 15 minutes for the same flight.
+SPEED_TARGET_FPS = 184 * 60 / 720
 VRAM_LIMIT = 6 * 2**30  # bytes allocated by PyTorch: leaves room on an 8 GB card
 
 
@@ -211,7 +216,7 @@ def test_default_command_writes_anahd_stem_next_to_the_input(run: Run) -> None:
 
 def test_output_is_hd_at_native_aspect_and_the_recordings_60_fps(run: Run) -> None:
     info = ffprobe(run.out)
-    assert (info["width"], info["height"]) == (1440, 1080)  # 4:3 picture -> 4:3 HD
+    assert (info["width"], info["height"]) == (1920, 1440)  # 4:3 picture -> 4:3 HD
     assert info["r_frame_rate"] == "60/1"
     assert info["codec_name"] == "h264" and info["pix_fmt"] == "yuv420p"
     assert info["color_space"] == "bt709"
@@ -230,7 +235,7 @@ def test_existing_output_is_not_overwritten(run: Run) -> None:
 
 def test_speed_is_reported(run: Run, record_property: Callable[[str, object], None]) -> None:
     """Steady throughput (start-up and the first 2 s excluded) on 1280x720 DVR input,
-    reported against the 10-minute target; it depends on the GPU, so it is not a pass/fail."""
+    reported against the 12-minute target; it depends on the GPU, so it is not a pass/fail."""
     steady = [(t, n) for t, n in run.reports if n >= 120]
     assert len(steady) >= 3, run.reports  # progress was reported while it ran
     (t0, n0), (t1, n1) = steady[0], steady[-1]
@@ -487,10 +492,10 @@ def test_fast_motion_is_not_worse_than_a_plain_upscale(roll: tuple[Path, Path, P
     assert min(po) >= min(pp) - 1.0  # no single frame falls apart
 
 
-def test_16_9_source_comes_out_1920x1080_without_bars_or_crop(
+def test_16_9_source_comes_out_2560x1440_without_bars_or_crop(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    """A 16:9 picture filling the DVR frame: 1920x1080 out, every edge is picture (no
+    """A 16:9 picture filling the DVR frame: 2560x1440 out, every edge is picture (no
     bars), and the whole picture is kept (no crop: no zoom, no shift against the truth)."""
     folder = tmp_path_factory.mktemp("wide")
     frames = 90
@@ -498,7 +503,7 @@ def test_16_9_source_comes_out_1920x1080_without_bars_or_crop(
     assert cli.main([str(clip.path)]) == 0
     out = folder / "AnaHD_wide.mp4"
     info = ffprobe(out)
-    assert (info["width"], info["height"]) == (1920, 1080)
+    assert (info["width"], info["height"]) == (2560, 1440)
     assert int(str(info["nb_read_frames"])) == frames
     outs = list(syn.read_bgr(out, (1920, 1080)))
     for i in (10, 45, 80):
@@ -540,7 +545,7 @@ def test_cuts_keep_exactly_the_frames_between_them(tmp_path: Path) -> None:
     assert sorted(p.name for p in tmp_path.iterdir()) == ["AnaHD_flight.mp4", "flight.mp4"]
     assert sha256(clip.path) == src_hash
     info = ffprobe(out)
-    assert (info["width"], info["height"], info["r_frame_rate"]) == (1440, 1080, "60/1")
+    assert (info["width"], info["height"], info["r_frame_rate"]) == (1920, 1440, "60/1")
     expected = [*range(30, 120), *range(150, 285)]
     got = syn.identify(syn.read_bgr(out, (syn.OUT_W, syn.OUT_H)), 300, syn.jumping_truth)
     assert int(str(info["nb_read_frames"])) == len(expected) == len(got)
@@ -601,7 +606,7 @@ def test_parts_never_overwrite_and_write_nothing_if_one_exists(tmp_path: Path) -
 def test_other_dvr_formats_come_out_4_3_hd_with_true_geometry(
     tmp_path: Path, name: str, layout: syn.Layout, fps: int, sar: str | None, mjpeg: bool
 ) -> None:
-    """A 4:3 analog picture recorded by an SD DVR comes out 1440x1080 at the recording's
+    """A 4:3 analog picture recorded by an SD DVR comes out 1920x1440 at the recording's
     rate with every frame, and the picture's geometry is the camera's: not stretched by
     the DVR's pixel shape (scale against the truth within 1 %)."""
     from anahd.media import probe
@@ -614,7 +619,7 @@ def test_other_dvr_formats_come_out_4_3_hd_with_true_geometry(
     assert cli.main([str(clip.path)]) == 0
     out = tmp_path / f"AnaHD_{name}.mp4"
     info = ffprobe(out)
-    assert (info["width"], info["height"]) == (1440, 1080), info
+    assert (info["width"], info["height"]) == (1920, 1440), info
     assert info["r_frame_rate"] == f"{fps}/1"
     assert int(str(info["nb_read_frames"])) == 60
     c = measure(clip.path, probe(clip.path), Options()).crop
@@ -635,7 +640,7 @@ def test_classic_cleaning_works_on_its_own(tmp_path: Path) -> None:
     assert cli.main([str(clip.path), "--no-learned"]) == 0
     out = tmp_path / "AnaHD_flight.mp4"
     info = ffprobe(out)
-    assert (info["width"], info["height"], info["r_frame_rate"]) == (1440, 1080, "60/1")
+    assert (info["width"], info["height"], info["r_frame_rate"]) == (1920, 1440, "60/1")
     assert int(str(info["nb_read_frames"])) == 90
     x, y, w, h = syn.FLAT
     size = (syn.OUT_W, syn.OUT_H)

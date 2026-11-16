@@ -16,7 +16,12 @@ from __future__ import annotations
 
 from anahd.remaster import RemasterParams
 
-RULE_FPS = 18.0  # a 3-minute flight in 10 minutes
+RULE_FPS = 184 * 60 / 720  # a 3-minute flight in 12 minutes (15.3 fps), the 1440-line target
+RULE_MINUTES = 12
+# The parts were measured at 1080 lines. At 1440 lines the default 4:3 clean measured
+# 17.9 to 18.9 fps over a 30 s clip (2026-11-16) against 20.9 here, so every estimate is
+# scaled by this until the parts are measured again at 1440.
+OUTPUT_1440 = 18.4 / 20.9
 FLIGHT_FRAMES = 180 * 60
 
 # ms per frame, from the measurements above
@@ -57,7 +62,7 @@ def frame_ms(params: RemasterParams, learned: bool) -> float:
 def _flight(params: RemasterParams, learned: bool, ratio: float = 1.0) -> tuple[float, float]:
     """Frames per second and seconds for a 3-minute flight; ``ratio``: this machine's speed
     over the measured one (``calibrate``)."""
-    per_frame = frame_ms(params, learned) / ratio
+    per_frame = frame_ms(params, learned) / (ratio * OUTPUT_1440)
     if params.stabilisation > 0:
         per_frame += STEADY_PASS_MS
     seconds = START_S + FLIGHT_FRAMES * per_frame / 1000
@@ -95,14 +100,14 @@ def costs(params: RemasterParams, learned: bool) -> dict[str, float]:
 
 
 def estimate(params: RemasterParams, learned: bool, ratio: float = 1.0) -> tuple[float, str | None]:
-    """Frames per second over a 3-minute flight, and a warning below the 10-minute rule."""
+    """Frames per second over a 3-minute flight, and a warning below the 12-minute rule."""
     fps, seconds = _flight(params, learned, ratio)
     if fps >= RULE_FPS:
         return fps, None
     minutes = seconds / 60
     return fps, (
         f"Below {RULE_FPS:.0f} fps: a 3-minute flight takes about {minutes:.1f} minutes "
-        "with these effects (more than 10)"
+        f"with these effects (more than {RULE_MINUTES})"
     )
 
 

@@ -123,10 +123,12 @@ def write(path: Path, frames: int, seed: int = 1) -> Clip:
 
 
 def read_bgr(path: Path, size: tuple[int, int], vf: str = "") -> Iterator[NDArray[np.uint8]]:
-    """Decoded frames of ``path`` as BGR of ``size`` (after the filter ``vf``); FFmpeg
+    """Decoded frames of ``path`` as BGR of ``size`` (after the filter ``vf``; a bigger
+    picture, such as AnaHD's 1440-line output, is reduced to ``size`` by area); FFmpeg
     applies each file's own colour matrix, so differently tagged files compare fairly."""
     w, h = size
     chain = f"{vf}," if vf else ""
+    chain += f"scale={w}:{h}:flags=area,"
     cmd = ["ffmpeg", "-v", "error", "-i", str(path), "-vf", f"{chain}format=bgr24"]
     cmd += ["-f", "rawvideo", "-"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)

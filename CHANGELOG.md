@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.0 (2026-11-16)
+
+- The installer now carries what TensorRT and compiling need to work in the installed app (ONNX, the SPAN loader, Triton's own files), so the downloaded TensorRT is really used there.
+- **HDZero recordings are left out of cleaning.** A recording at 90 fps or with a 1920x1080
+  picture is an HDZero digital recording, and is now recognised as such even when the
+  OSD finder sees "OSD" in it. It is listed as "HDZero digital recording" and can still be
+  cleaned with Include anyway. 720p at 50 or 60 fps is judged as before.
+- **TensorRT is found and used when present.** AnaHD looks for NVIDIA's free TensorRT
+  (10.15, CUDA 12) next to its own install and in your AnaHD folder, and runs without it
+  when it is missing. It is too big for the installer (about 2.2 GB), so the app shows a
+  quiet strip with a "Download TensorRT" button that fetches it from NVIDIA; the README
+  lists it as a recommended requirement with the download link. Built engines are cached
+  per graphics card, driver and TensorRT version.
+- **1440-line output.** Pictures now come out at 1440 lines in their own shape: 1920x1440
+  for 4:3 and 2560x1440 for 16:9 (a 16:9 DVR frame with the analog line's blanking at the
+  sides counts as 16:9). The learned restorer's 2x output is used as it is instead of being
+  shrunk to 1080 lines.
+- **A line pattern is gone.** At 1:1 the restorer's output carried faint horizontal lines
+  (a 4 px period, its pixel-shuffle phase). A narrow vertical filter on the luma removes
+  them without softening the picture.
+- **The classic path upscales with SPAN.** Without the learned restorer, the 2x SPAN
+  upscaler (`--no-ai` for Lanczos) replaces the Lanczos resize: TensorRT when present, else
+  PyTorch FP16, else Lanczos.
+- **Faster cleaning on longer clips.** The U-Net runs on TensorRT and RAFT's update loop is
+  compiled (Triton, cached under `%LOCALAPPDATA%\AnaHD`), each falling back to the plain
+  path on any failure. The first compile of a picture size takes about 95 s, so it is only
+  done on a clip of 9 minutes or more; a size compiled before is reused from 10 s.
+
 ## 0.1.5 (2026-11-09)
 
 - **AnaHD can open inside okFPV.** okFPV's AnaHD tab now shows AnaHD in its own window,

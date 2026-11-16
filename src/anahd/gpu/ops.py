@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from functools import lru_cache
 
 import numpy as np
 import torch
@@ -33,9 +32,41 @@ def gaussian_kernel(sigma: float, size: int | None = None) -> NDArray[np.float32
     return np.asarray(k / k.sum(), dtype=np.float32)
 
 
-@lru_cache(maxsize=64)
+_GAUSS: dict[tuple[float, int | None, str], Tensor] = {}
+
+
 def _kernel_tensor(sigma: float, size: int | None, device: str) -> Tensor:
-    return torch.from_numpy(gaussian_kernel(sigma, size)).to(device)
+    """A plain dict, not an lru_cache over numpy: compiled code can then read the cached
+    device tensors without tracing CPU work (call once uncompiled to fill it)."""
+    key = (sigma, size, device)
+    if key not in _GAUSS:
+        _GAUSS[key] = torch.from_numpy(gaussian_kernel(sigma, size)).to(device)
+    return _GAUSS[key]
+
+
+NOTCH_TAPS = 33
+_NOTCHES: dict[str, Tensor] = {}
+
+
+def notch_kernel(taps: int = NOTCH_TAPS) -> NDArray[np.float32]:
+    """Vertical taps that pass everything except a narrow band around 0.25 cycles per pixel
+    (a 4 px period): unit gain elsewhere, zero at the band's centre."""
+    t = np.arange(taps, dtype=np.float64) - taps // 2
+    band = np.hanning(taps + 2)[1:-1] * np.cos(np.pi * t / 2)
+    band *= 1.0 / (band * np.cos(np.pi * t / 2)).sum()  # gain 1 at 0.25 cycles/px
+    k = -band
+    k[taps // 2] += 1.0
+    return np.asarray(k, dtype=np.float32)
+
+
+def vertical_notch(x: Tensor) -> Tensor:
+    """(H, W) plane with the 4 px vertical period removed. The restorer's 2x output carries
+    it as faint horizontal lines (its 4x4 pixel-shuffle phase); real picture content never
+    reaches it (an analog picture holds at most 0.17 cycles/px at 1440 lines)."""
+    key = str(x.device)
+    if key not in _NOTCHES:
+        _NOTCHES[key] = torch.from_numpy(notch_kernel()).to(x.device)
+    return _conv_axis(_batch(x), _NOTCHES[key], 2).reshape(x.shape)
 
 
 def _reflect101(x: Tensor, r: int, axis: int) -> Tensor:

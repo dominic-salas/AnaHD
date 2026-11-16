@@ -15,7 +15,7 @@ runs on your PC.
 
 Left: the recording's picture area upscaled with plain Lanczos. Right: AnaHD. Same frame of a
 daytime flight, with a breakup band across the lower third. Lower: a 1:1 crop of that
-frame at 1440x1080.
+frame at 1920x1440.
 
 > **Built for one pilot's gear.** AnaHD is a personal tool, shared as is. Its learned
 > model was trained on one camera, one video link and one DVR, so on your footage it may
@@ -28,8 +28,8 @@ frame at 1440x1080.
 **[Download the latest installer](https://github.com/dominic-salas/AnaHD/releases/latest)**
 (`AnaHD-<version>-setup.exe`, under Assets) and run it. It installs for your user (no
 admin rights), offers a desktop shortcut and a Start-menu entry with an uninstaller, and
-brings everything it needs: FFmpeg, PyTorch's CUDA libraries and the model. Nothing else
-is downloaded.
+brings everything it needs to run: FFmpeg, PyTorch's CUDA libraries and the model.
+TensorRT (below) is the one optional extra and is not part of the installer.
 
 **Needs**
 - Windows 10 or 11, 64-bit.
@@ -37,6 +37,15 @@ is downloaded.
   and a current driver (one that supports CUDA 12.8). Older cards such as the GTX 10
   series are not supported; AnaHD says so instead of starting. Only an RTX 4070 Ti has
   been tested; PyTorch used at most 1.2 GB of graphics memory there.
+- Recommended, free: **NVIDIA TensorRT 10.15** for CUDA 12 (the build that goes with the
+  app's CUDA 12.8 PyTorch). It makes the GPU steps that support it faster. Without it
+  AnaHD runs the same steps in plain PyTorch, with the same picture, just slower; nothing
+  is blocked. It is about 2.2 GB, too big for the installer, so the app shows a "Download
+  TensorRT" button under its header that fetches it from NVIDIA into your own AnaHD folder
+  (`%LOCALAPPDATA%\AnaHD	ensorrt`, no admin rights). You can also get it from
+  [NVIDIA's TensorRT page](https://developer.nvidia.com/tensorrt-getting-started)
+  (download the CUDA 12 build, version 10.15). The first time a step uses it, it builds a
+  GPU-specific engine (about a minute) and keeps it for later clips.
 - About 7 GB of free memory (RAM plus page file) while a clip is cleaned. Games and
   virtual machines running at the same time can use that up; AnaHD then retries the clip
   once and tells you if it still could not finish.
@@ -99,7 +108,7 @@ when you close the window while nothing is being cleaned.
 **Outputs** are named `AnaHD_<recording>.mp4` (with separate parts: `AnaHD_<recording>_part1.mp4`,
 ...). They are never overwritten, and your recordings are never changed: renders go to a
 `.partial.mp4` that is renamed only once its frame count checks out, so a failed or stopped
-run leaves nothing behind. 1440x1080 for 4:3 pictures (1920x1080 for 16:9), the recording's
+run leaves nothing behind. 1440 lines at the picture's own shape: 1920x1440 for 4:3 pictures (2560x1440 for 16:9), the recording's
 frame rate, H.264, with the recording's sound (AAC, kept in sync through cuts and parts).
 
 **Command line** (`anahd-cli.exe` in the install folder, or `anahd` from source):
@@ -146,8 +155,8 @@ AnaHD was built for my own flying. The recordings it was developed and tested on
   protected.
 - **Other DVR formats**: tested on synthetic recordings at 1280x720 (4:3 in bars), 720x480
   NTSC (pixel shape tagged or not), 720x576 PAL at 50 fps, 640x480 MJPEG 4:2:2 (older
-  DVRs) and full-frame 16:9: all come out at the right shape (4:3 as 1440x1080, 16:9 as
-  1920x1080) with every frame, at the recording's frame rate.
+  DVRs) and full-frame 16:9: all come out at the right shape (4:3 as 1920x1440, 16:9 as
+  2560x1440) with every frame, at the recording's frame rate.
 
 **The digital check assumes a burned-in OSD.** If you fly analog with the OSD off, every
 clip will be flagged as digital: use **Include anyway**. If your digital system burns its
@@ -182,8 +191,10 @@ on the GPU:
    colour get it back from them.
 3. **Restore and upscale** (Learned). A 5-frame U-Net (3.0 M parameters) sees the repaired
    frame and its aligned neighbours at -2..+2 and predicts a residual on a bicubic 2x of
-   the frame, then resampled to 1440x1080. (Classic: fusion, destripe and derainbow, then
-   a Lanczos upscale with clamped sharpening.)
+   the frame, giving 1920x1440 (2560x1440 for 16:9) directly. A faint 4 px line pattern the
+   network leaves in its 2x output is filtered out of the luma. (Classic: fusion, destripe
+   and derainbow, then the SPAN 2x upscaler, or a Lanczos upscale with clamped sharpening
+   if that cannot run.)
 4. **Protect the OSD.** OSD pixels keep the current frame instead of a blend of moved
    neighbours, so readouts don't smear or ghost.
 5. **Remaster.** The colour fixes and the look, then the effects you chose
@@ -199,11 +210,14 @@ the raw teacher so fine detail is not averaged away.
 
 ## Speed
 
-On an RTX 4070 Ti, default settings (Learned cleaning and the look, no effects): a 184 s
-flight (11,032 frames, 1280x720 H.265 DVR recording) cleaned to 1440x1080 in 503 s,
-**21.9 fps**, so 8.4 minutes for a 3-minute flight, including start-up, measuring and the
-x264 encode. Each effect adds to that; the settings panel shows each one's cost and the
-estimated speed before you start. Slower cards will be slower.
+On an RTX 4070 Ti, default settings (Learned cleaning and the look, no effects), a 30 s
+1280x720 recording (1,800 frames) is cleaned to 1440 lines in 95 s for a 4:3 picture
+(1920x1440, **18.9 fps**, so about 9.5 minutes for a 3-minute flight) and in 147 s for a 16:9
+picture (2560x1440, **12.3 fps**, about 15 minutes for a 3-minute flight), including
+start-up, measuring and the x264 encode. Each effect adds to that; the settings panel shows
+each one's cost and the estimated speed before you start. Slower cards will be slower.
+Clips of 10 seconds or more also use TensorRT for the restorer (built once per picture size,
+about 10 s) for about 5% more speed.
 
 ## Building from source
 
@@ -212,6 +226,7 @@ With [uv](https://docs.astral.sh/uv/) and FFmpeg on PATH:
 ```
 git clone https://github.com/dominic-salas/AnaHD && cd AnaHD
 uv sync --extra app          # PyTorch with CUDA (~4 GB), PySide6, dev tools
+uv sync --extra app --extra ai   # the same plus TensorRT 10.15 (pip `tensorrt-cu12`)
 uv run anahd-app             # the app; or: uv run anahd flight.mp4
 uv run pytest                # ~10 min with a GPU; GPU tests skip without one
 uv run ruff check . && uv run mypy
@@ -240,5 +255,5 @@ install folder under `licenses`.
 - Teacher for the restorer: [SeedVR2](https://github.com/ByteDance-Seed/SeedVR) 7B sharp
   (ByteDance Seed, Apache-2.0), run through
   [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler).
-- `--ai` (optional, from source): [2xNomosUni_span_multijpg_ldl](https://huggingface.co/Phips/2xNomosUni_span_multijpg_ldl)
+- Classic path upscaler (`--no-learned`; `--no-ai` for Lanczos): [2xNomosUni_span_multijpg_ldl](https://huggingface.co/Phips/2xNomosUni_span_multijpg_ldl)
   by Philip Hofmann (CC BY 4.0), a [SPAN](https://github.com/hongyuanyu/SPAN) model.

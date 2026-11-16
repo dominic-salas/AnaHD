@@ -1,11 +1,11 @@
 """The speed shown under the settings: it reproduces the measured renders and warns below
-the 10-minute rule (18 fps over a 3-minute flight)."""
+the 12-minute rule (15.3 fps over a 3-minute flight at 1440 lines)."""
 
 from __future__ import annotations
 
 import pytest
 
-from anahd.app.speed import estimate, frame_ms
+from anahd.app.speed import RULE_FPS, estimate, frame_ms
 from anahd.remaster import NO_LOOK, RemasterParams
 
 ALL_FOUR = RemasterParams(motion_blur=39, stabilisation=50, superview="stretch", sharpen=50)
@@ -20,12 +20,12 @@ def test_reproduces_the_measured_renders() -> None:
     assert 1000 / frame_ms(ALL_FOUR, False) == pytest.approx(20.2, rel=0.05)
 
 
-def test_warns_below_18_fps_and_not_at_the_defaults() -> None:
+def test_warns_below_the_12_minute_rule_and_not_at_the_defaults() -> None:
     fps, warning = estimate(RemasterParams(), True)
-    assert fps > 18 and warning is None
-    fps, warning = estimate(ALL_FOUR, True)
-    assert fps < 18 and warning is not None and "10.1 minutes" in warning
-    assert estimate(ALL_FOUR.with_(osd_redraw=True), False)[1] is not None
+    assert fps > RULE_FPS and warning is None
+    assert estimate(ALL_FOUR, True)[1] is None  # about 16.5 fps at 1440 lines
+    fps, warning = estimate(ALL_FOUR, True, ratio=0.8)  # a slower card
+    assert fps < RULE_FPS and warning is not None and "more than 12" in warning
 
 
 def test_each_effect_costs_time() -> None:

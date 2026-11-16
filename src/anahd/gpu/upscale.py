@@ -1,16 +1,18 @@
-"""Learned 2x upscale of the cleaned frame (optional, ``--ai``), run with TensorRT.
+"""Learned 2x upscale of the cleaned frame (the classic path's default), run with TensorRT.
 
 The model is 2xNomosUni_span_multijpg_ldl by Philip Hofmann (SPAN network, CC BY 4.0):
 a fast general-purpose 2x upscaler trained on photos with compression and resampling
-damage. It upscales the cleaned 960x720 picture to 1920x1440, which is then reduced to
-1440x1080: the extra resolution is supersampled, so edges come out finer than a direct
-1.5x resample can make them. Weights are downloaded once and cached; the TensorRT engine
-is built once per picture size and cached too (building takes about a minute).
+damage. It upscales the cleaned 960x720 picture to 1920x1440 (1280x720 to 2560x1440), the
+output size, so nothing is shrunk afterwards. Weights are downloaded once and cached; the
+TensorRT engine is built once per picture size and cached too (building takes about a
+minute). Without TensorRT the model runs in PyTorch FP16; if that cannot run either,
+:func:`make_upscaler` returns None and the caller uses Lanczos.
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import urllib.request
 from pathlib import Path
@@ -20,6 +22,9 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from anahd.errors import AnaHDError
+from anahd.gpu.engine import build_engine
+
+log = logging.getLogger(__name__)
 
 MODEL_NAME = "2xNomosUni_span_multijpg_ldl"
 MODEL_URL = (
@@ -68,65 +73,38 @@ class Upscaler:
         self.stream = torch.cuda.Stream(device)  # type: ignore[no-untyped-call, unused-ignore]
         self._in = torch.zeros(1, 3, h, w, device=device, dtype=torch.float16)
         self._out = torch.zeros(1, 3, h * SCALE, w * SCALE, device=device, dtype=torch.float16)
-        self._trt = self._engine(weights)
-
-    def _engine(self, weights: Path):  # type: ignore[no-untyped-def]
-        """A TensorRT execution context, or None to run the model in PyTorch (slower)."""
-        try:
-            import tensorrt as trt
-        except ImportError:
-            return None
-        w, h = self.size
-        gpu = torch.cuda.get_device_name(self.device).replace(" ", "_")
-        name = f"{MODEL_NAME}_{MODEL_SHA256[:12]}_{w}x{h}_{gpu}_trt{trt.__version__}.engine"
-        path = cache_dir() / "engines" / name
-        log = trt.Logger(trt.Logger.ERROR)
-        if not path.is_file():
-            onnx = path.with_suffix(".onnx")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with torch.inference_mode():
-                torch.onnx.export(
-                    self.model,
-                    (self._in,),
-                    str(onnx),
-                    input_names=["x"],
-                    output_names=["y"],
-                    opset_version=17,
-                    dynamo=False,
-                )
-            builder = trt.Builder(log)
-            network = builder.create_network(0)
-            parser = trt.OnnxParser(network, log)
-            if not parser.parse(onnx.read_bytes()):
-                raise AnaHDError(f"TensorRT could not read the model: {parser.get_error(0)}")
-            serial = builder.build_serialized_network(network, builder.create_builder_config())
-            if serial is None:
-                raise AnaHDError("TensorRT could not build the upscale engine")
-            path.write_bytes(bytes(serial))
-            onnx.unlink()
-        engine = trt.Runtime(log).deserialize_cuda_engine(path.read_bytes())
-        ctx = engine.create_execution_context()
-        ctx.set_tensor_address("x", self._in.data_ptr())
-        ctx.set_tensor_address("y", self._out.data_ptr())
-        self._engine_ref = engine  # keep alive while the context is used
-        return ctx
+        key = f"{MODEL_NAME}_{MODEL_SHA256[:12]}_{w}x{h}"
+        self._trt = build_engine(self.model, self._in, key)
 
     def __call__(self, rgb: Tensor) -> Tensor:
-        self._in.copy_(rgb[None])
         main = torch.cuda.current_stream(self.device)
         self.stream.wait_stream(main)
         with torch.cuda.stream(self.stream):
+            self._in.copy_(rgb[None])
             if self._trt is not None:
-                self._trt.execute_async_v3(self.stream.cuda_stream)
+                out = self._trt.run(self._in, self.stream.cuda_stream)
             else:
                 with torch.inference_mode():
-                    self._out.copy_(self.model(self._in))
+                    out = self.model(self._in)
+            self._out.copy_(out)
         main.wait_stream(self.stream)
         return self._out[0].float()
+
+
+def make_upscaler(size: tuple[int, int], device: torch.device) -> Upscaler | None:
+    """The SPAN upscaler, or None (use Lanczos) when it cannot be set up: no spandrel, no
+    download, no memory."""
+    try:
+        return Upscaler(size, device)
+    except Exception as exc:
+        log.warning("the learned upscaler is not available (%s); using Lanczos", exc)
+        return None
 
 
 def reduce(rgb: Tensor, size: tuple[int, int]) -> Tensor:
     """(3, H, W) -> (3, height, width) with an antialiased bicubic."""
     w, h = size
+    if tuple(rgb.shape[-2:]) == (h, w):
+        return rgb
     out = F.interpolate(rgb[None], size=(h, w), mode="bicubic", antialias=True, align_corners=False)
     return out[0]
