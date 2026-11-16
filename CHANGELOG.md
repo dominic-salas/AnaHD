@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- **HDZero recordings are left out of cleaning.** A recording at 90 fps or with a 1920x1080
+  picture is an HDZero digital recording, and is now recognised as such even when the
+  OSD finder sees "OSD" in it. It is listed as "HDZero digital recording" and can still be
+  cleaned with Include anyway. 720p at 50 or 60 fps is judged as before.
+
 ## 0.1.5 (2026-11-09)
 
 - **AnaHD can open inside okFPV.** okFPV's AnaHD tab now shows AnaHD in its own window,

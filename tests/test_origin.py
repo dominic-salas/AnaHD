@@ -6,8 +6,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
 import synthetic as syn
-from anahd.media import probe
+from anahd.media import VideoInfo, probe
 from anahd.origin import Origin, judge
 from anahd.pipeline import Options, measure
 
@@ -45,3 +47,37 @@ def test_known_limit_a_nearly_still_digital_clip_is_not_flagged(tmp_path: Path) 
     pins the limit down; it is the safe way to be wrong."""
     o = _judge(tmp_path, syn.without_osd(syn.WIDE, speed=1), syn.WIDE)
     assert not o.digital, o
+
+
+def _info(w: int, h: int, fps: str) -> VideoInfo:
+    return VideoInfo(w, h, fps, False, False, 10.0)
+
+
+class _Meas:
+    def __init__(self, osd: float) -> None:
+        self.osd = np.full(4, osd)
+
+
+def _j(info: VideoInfo, osd: float) -> Origin:
+    return judge(info, _Meas(osd))  # type: ignore[arg-type]
+
+
+def test_90_fps_is_hdzero_even_with_an_osd_found() -> None:
+    o = _j(_info(1280, 720, "90/1"), 0.05)
+    assert o.digital and o.reasons == "HDZero digital recording"
+
+
+def test_1080_line_picture_is_hdzero() -> None:
+    o = _j(_info(1920, 1080, "60/1"), 0.05)
+    assert o.digital and o.hdzero
+
+
+def test_analog_720p60_keeps_the_osd_rule() -> None:
+    assert not _j(_info(1280, 720, "60/1"), 0.05).digital
+    o = _j(_info(1280, 720, "60000/1001"), 0.0)
+    assert o.digital and o.reasons == "no OSD" and not o.hdzero
+
+
+def test_50_fps_4_3_is_not_hdzero() -> None:
+    o = _j(_info(720, 576, "50/1"), 0.05)
+    assert not o.digital and not o.hdzero

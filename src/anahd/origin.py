@@ -21,18 +21,39 @@ from anahd.media import VideoInfo
 from anahd.pipeline import Measured
 
 NO_OSD = 0.002  # share of the picture: below this, no OSD was found
+HDZERO = "HDZero digital recording"
 
 
 @dataclass(frozen=True)
 class Origin:
     digital: bool
     osd_share: float
+    hdzero: bool = False
 
     @property
     def reasons(self) -> str:
+        if self.hdzero:
+            return HDZERO
         return "no OSD" if self.digital else ""
+
+
+def _fps(info: VideoInfo) -> float:
+    num, _, den = info.fps.partition("/")
+    try:
+        return float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def is_hdzero(info: VideoInfo) -> bool:
+    """HDZero goggles record 90 fps, or a 1920x1080 picture (HDZero firmware dvr.c).
+    Analog DVRs record 720x480, 720x576 or 1280x720 at 50/60 fps, so neither rule fires
+    for them; 720p at 50/60 fps stays undecided."""
+    return 89.0 <= _fps(info) <= 91.0 or (info.width == 1920 and info.height == 1080)
 
 
 def judge(info: VideoInfo, meas: Measured) -> Origin:
     osd = float(meas.osd.mean()) if meas.osd.size else 0.0
+    if is_hdzero(info):
+        return Origin(True, osd, True)
     return Origin(osd < NO_OSD, osd)
