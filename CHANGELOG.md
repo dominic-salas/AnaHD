@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+- **Compiling is off.** Compiling the flow step (Triton) measured no faster than TensorRT
+  alone on a 3-minute flight (671 s against 651 s), took 95 s for each new picture size and
+  could not run in the installed app. It now runs only with `ANAHD_COMPILE=1` (a test
+  option), Triton is an optional extra (`compile`) instead of a dependency, and the installer
+  no longer carries it.
+- **TensorRT's first build is announced.** When an engine for a new picture size is being
+  built the status line says "Preparing TensorRT for this picture size (first time only)",
+  in the app and on the command line (which now prints each stage as it starts). Engines
+  already built are loaded without it.
+
 ## 0.2.0 (2026-11-16)
 
 - The installer now carries what TensorRT and compiling need to work in the installed app (ONNX, the SPAN loader, Triton's own files), so the downloaded TensorRT is really used there.

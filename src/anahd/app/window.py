@@ -731,7 +731,7 @@ class MainWindow(QMainWindow):
     def _stage_reported(self, path: Path, text: str) -> None:
         clip = self._clips.get(path)
         if clip is not None and clip.state == CLEANING and not clip.item.data(SHARE):
-            self._set_status(clip, f"{text}...", 0.0)
+            self._set_status(clip, text if text.endswith(")") else f"{text}...", 0.0)
             self._refresh()
 
     def _live_picture(self, path: Path, before: bytes, after: bytes, n: int, total: int) -> None:

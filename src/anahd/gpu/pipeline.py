@@ -7,6 +7,7 @@ so decoding, cleaning and encoding overlap.
 
 from __future__ import annotations
 
+import os
 import queue
 import sys
 import threading
@@ -38,7 +39,7 @@ from anahd.gpu.breakup import (
     trimmed_mean,
 )
 from anahd.gpu.device import cuda_device
-from anahd.gpu.engine import compile_available, compile_is_warm
+from anahd.gpu.engine import compile_available, compile_is_warm, set_build_notice
 from anahd.gpu.flow import Encoded, Flow
 from anahd.gpu.upscale import Upscaler, make_upscaler, reduce
 from anahd.look import LookConfig
@@ -146,6 +147,11 @@ def to_bt709(bt709_source: bool) -> np.ndarray:
     return np.asarray(dst @ src, dtype=np.float64)
 
 
+def flow_is_warm(clean: CleanConfig, gcfg: GpuConfig, small: tuple[int, int]) -> bool:
+    """Whether the flow network's compiled code for this picture size is cached already."""
+    return compile_is_warm(f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}")
+
+
 class Cleaner:
     """Per-recording state on the GPU; ``prepare`` each frame, then ``clean`` each centre."""
 
@@ -203,8 +209,11 @@ class Cleaner:
         self.fill = ops.Filler(
             t(cv2.resize(boxes.astype(np.uint8), small, interpolation=nearest) > 0)
         )
-        warm = compile_is_warm(f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}")
-        compile_flow = gcfg.fast is True and (gcfg.fast_cold or warm)
+        compile_flow = (
+            gcfg.fast is True
+            and compile_available()
+            and (gcfg.fast_cold or flow_is_warm(clean, gcfg, small))
+        )
         self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device, compile_flow)
         self.curve = t(curve.astype(np.float32))
         ys, xs = torch.meshgrid(
@@ -1102,7 +1111,10 @@ Stage = Callable[[str], None]  # what the clean is doing, before the first frame
 # number in this call (from 0).
 Picture = Callable[[bytes, bytes, int], None]
 FAST_MIN_SECONDS = 10.0  # shorter clips do not earn back the accelerators' start-up
-FAST_COLD_SECONDS = 540.0  # a first compile (about 95 s) pays back from about 9 minutes
+# Compiling (ANAHD_COMPILE=1, a test option) takes about 95 s for a new picture size and saves
+# about 2.3 ms a frame on paper; a 3-minute flight measured no faster with it, so it is off by
+# default and only clips this long would pay it back.
+FAST_COLD_SECONDS = 540.0
 
 
 def _with_speedups(gcfg: GpuConfig, info: VideoInfo, opts: Options) -> GpuConfig:
@@ -1110,8 +1122,10 @@ def _with_speedups(gcfg: GpuConfig, info: VideoInfo, opts: Options) -> GpuConfig
     if gcfg.fast is not None or gcfg.learned is None:
         return gcfg
     seconds = opts.duration if opts.duration is not None else info.duration
-    fast = compile_available() and seconds >= FAST_MIN_SECONDS
-    return replace(gcfg, fast=fast, fast_cold=seconds >= FAST_COLD_SECONDS)
+    # ANAHD_COMPILE_MIN_SECONDS moves the line for compiling (tests, timing on short clips).
+    line = float(os.environ.get("ANAHD_COMPILE_MIN_SECONDS", FAST_COLD_SECONDS))
+    fast = torch.cuda.is_available() and seconds >= FAST_MIN_SECONDS
+    return replace(gcfg, fast=fast, fast_cold=compile_available() and seconds >= line)
 
 
 PINNED_SLOTS = 4  # frames in flight to the GPU on the sync-free upload
@@ -1135,6 +1149,7 @@ def enhance(
     ``stage_report`` hears what is being done before the first frame; ``picture`` gets a
     before/after pair of the output now and then (see :mod:`anahd.snapshot`)."""
     say = stage_report or (lambda _what: None)
+    set_build_notice(say)
     if opts.steady is not None:
         raise AnaHDError("--steady runs on the CPU only; add --cpu")
     device = cuda_device()

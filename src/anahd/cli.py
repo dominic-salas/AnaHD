@@ -219,6 +219,10 @@ def print_progress(done: int, total: int | None, rate: float) -> None:
     print(f"\r{line}   ", end="", file=sys.stderr, flush=True)
 
 
+def print_stage(text: str) -> None:
+    print(f"{text}...", file=sys.stderr, flush=True)
+
+
 def part_outputs(out: Path, count: int) -> list[Path]:
     """Where each kept part goes with --parts: AnaHD_x_part1.mp4, ... (one part: out)."""
     if count <= 1:
@@ -528,7 +532,7 @@ def join(parts: list[Path], out: Path) -> None:
 
 def run_one(src: Path, out: Path, args: argparse.Namespace) -> None:
     written = planned_outputs(src, out, args) if src.is_file() else [out]
-    result, took = render(src, out, args, print_progress)
+    result, took = render(src, out, args, print_progress, print_stage)
     names = ", ".join(str(w) for w in written)
     print(
         f"\r{names}: {result.frames} frames at {result.size[0]}x{result.size[1]} "

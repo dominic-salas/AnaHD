@@ -49,7 +49,6 @@ dependencies = [
     { name = "spandrel" },
     { name = "torch" },
     { name = "torchvision" },
-    { name = "triton-windows", marker = "sys_platform == 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -58,6 +57,9 @@ ai = [
 ]
 app = [
     { name = "pyside6-essentials" },
+]
+compile = [
+    { name = "triton-windows", marker = "sys_platform == 'win32'" },
 ]
 train = [
     { name = "diffusers" },
@@ -101,9 +103,9 @@ requires-dist = [
     { name = "torch", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchvision", specifier = ">=0.20", index = "https://download.pytorch.org/whl/cu128" },
     { name = "tqdm", marker = "extra == 'train'", specifier = ">=4.66" },
-    { name = "triton-windows", marker = "sys_platform == 'win32'", specifier = ">=3.6,<3.7" },
+    { name = "triton-windows", marker = "sys_platform == 'win32' and extra == 'compile'", specifier = ">=3.6,<3.7" },
 ]
-provides-extras = ["app", "ai", "train"]
+provides-extras = ["app", "ai", "compile", "train"]
 
 [package.metadata.requires-dev]
 build = [{ name = "pyinstaller", specifier = ">=6.16" }]
