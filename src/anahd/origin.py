@@ -83,10 +83,10 @@ MIN_STD = 5.0  # flat tiles say nothing about detail
 DARK, BRIGHT = 25.0, 235.0  # nor do crushed or clipped ones
 MIN_TILES = 8  # per frame
 _FRAMES = 24  # how many of the measured samples are looked at
-# Median frame score above which a recording looks digital. Measured through measure() on 108
-# labelled analog recordings (three cameras) the highest median is -1.80 (-2.11 over 300 more
-# sampled by hand); this keeps 0.5 of margin. It finds 35 of 40 labelled HDZero recordings
-# (the misses are dark or blurry scenes).
+# Median frame score above which a recording looks digital. Measured through measure() on 111
+# analog recordings (three cameras; the owner's doubtful clip included) the highest median is
+# -1.80 (-2.11 over 300 more sampled by hand); this keeps 0.5 of margin. It finds 39 of 45
+# HDZero recordings the owner confirmed (the misses are dark or blurry scenes).
 THRESHOLD = -1.3
 
 _win = np.outer(np.hanning(TILE), np.hanning(TILE)).astype(np.float32)
