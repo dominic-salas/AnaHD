@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -101,7 +102,19 @@ def compile_available() -> bool:
         import triton  # type: ignore[import-untyped, unused-ignore]  # noqa: F401
     except ImportError:
         return False
-    return True
+    return not getattr(sys, "frozen", False) or _frozen_can_compile()
+
+
+def _frozen_can_compile() -> bool:
+    """In the installed app Triton needs the CUDA files and Python's headers and library
+    next to it; when they are not there, compiling would only fail after a wait, so the plain
+    path runs from the start."""
+    try:
+        from triton import windows_utils  # type: ignore[import-untyped, unused-ignore]
+
+        return bool(windows_utils.find_cuda()[0]) and bool(windows_utils.find_python())
+    except Exception:
+        return False
 
 
 def use_compile_cache() -> None:
@@ -134,15 +147,44 @@ def maybe_compile(fn: Callable[..., Any], enabled: bool) -> Callable[..., Any]:
     return Compiled(fn) if enabled else fn
 
 
+def compile_stamp() -> str:
+    """What the compiled code in the cache was made for: this GPU and driver, torch and
+    triton, and this AnaHD. The same stamp finds it again; any change recompiles once."""
+    import hashlib
+
+    from anahd import __version__
+    from anahd.gpu import trt as finder
+
+    try:
+        import triton  # type: ignore[import-untyped, unused-ignore]
+
+        triton_version = str(triton.__version__)
+    except ImportError:
+        triton_version = "none"
+    try:
+        gpu = torch.cuda.get_device_name() if torch.cuda.is_available() else "nogpu"
+    except Exception:
+        gpu = "nogpu"
+    raw = "|".join((gpu, finder._driver(), torch.__version__, triton_version, __version__))
+    return hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def _marker(tag: str) -> Path:
+    """Kept inside the inductor cache folder it describes, so emptying one empties both."""
+    use_compile_cache()
+    return Path(os.environ["TORCHINDUCTOR_CACHE_DIR"]) / f"{tag}.{compile_stamp()}.warm"
+
+
 def compile_is_warm(tag: str) -> bool:
-    """Whether ``tag`` (a network and picture size) was compiled before, so its compile
-    cache is there and starting it costs about two seconds instead of a minute and a half."""
-    return (cache_dir() / "inductor" / f"{tag}.warm").is_file()
+    """Whether ``tag`` (a network and picture size) was compiled before on this GPU, driver
+    and software, so its compile cache is there and starting it costs about two seconds
+    instead of a minute and a half."""
+    return _marker(tag).is_file()
 
 
 def mark_compiled(tag: str, fn: Callable[..., Any]) -> None:
     if getattr(fn, "failed", True):
         return
-    marker = cache_dir() / "inductor" / f"{tag}.warm"
+    marker = _marker(tag)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()

@@ -81,3 +81,59 @@ def test_accelerators_are_for_clips_that_earn_back_their_start_up(
     assert decide(FAST_COLD_SECONDS + 1).fast_cold
     assert decide(300, replace(cfg, fast=False)).fast is False  # an explicit choice stays
     assert decide(300, GpuConfig()).fast is None  # the classic path is left alone
+
+
+def test_a_flight_gets_the_compile_and_a_short_clip_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("anahd.gpu.pipeline.compile_available", lambda: True)
+    monkeypatch.delenv("ANAHD_COMPILE_MIN_SECONDS", raising=False)
+    info = VideoInfo(1280, 720, "60/1", False, False, 0.0)
+    cfg = GpuConfig(learned=Path("m.pt"))
+    for seconds, cold in ((60, False), (180, True), (300, True)):
+        got = _with_speedups(cfg, replace(info, duration=seconds), Options())
+        assert got.fast_cold is cold, seconds
+
+
+def test_the_marker_is_for_this_gpu_and_software_and_not_written_after_a_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(engine, "compile_stamp", lambda: "aaaa")
+    assert not engine.compile_is_warm("raft_1x1")
+
+    class Broken:
+        failed = True
+
+        def __call__(self) -> None: ...
+
+    engine.mark_compiled("raft_1x1", Broken())
+    assert not engine.compile_is_warm("raft_1x1")  # a failed compile leaves no marker
+
+    class Fine:
+        failed = False
+
+        def __call__(self) -> None: ...
+
+    engine.mark_compiled("raft_1x1", Fine())
+    assert engine.compile_is_warm("raft_1x1")
+    monkeypatch.setattr(engine, "compile_stamp", lambda: "bbbb")  # new driver, torch, AnaHD...
+    assert not engine.compile_is_warm("raft_1x1")
+
+
+def test_the_stamp_is_the_same_every_time() -> None:
+    assert engine.compile_stamp() == engine.compile_stamp()
+    assert len(engine.compile_stamp()) == 12
+
+
+def test_the_installed_app_compiles_only_when_triton_has_what_it_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    pytest.importorskip("triton")
+    monkeypatch.delenv("ANAHD_NO_COMPILE", raising=False)
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr(engine, "_frozen_can_compile", lambda: False)
+    assert not engine.compile_available()
+    monkeypatch.setattr(engine, "_frozen_can_compile", lambda: True)
+    assert engine.compile_available()

@@ -7,6 +7,7 @@ so decoding, cleaning and encoding overlap.
 
 from __future__ import annotations
 
+import os
 import queue
 import sys
 import threading
@@ -146,6 +147,17 @@ def to_bt709(bt709_source: bool) -> np.ndarray:
     return np.asarray(dst @ src, dtype=np.float64)
 
 
+def flow_is_warm(clean: CleanConfig, gcfg: GpuConfig, small: tuple[int, int]) -> bool:
+    """Whether the flow network's compiled code for this picture size is cached already."""
+    return compile_is_warm(f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}")
+
+
+def needs_first_compile(clean: CleanConfig, gcfg: GpuConfig, crop: Crop) -> bool:
+    """Whether starting this clean compiles the flow network for a new picture size."""
+    small = (round(crop.width * clean.flow_scale), round(crop.height * clean.flow_scale))
+    return gcfg.fast is True and gcfg.fast_cold and not flow_is_warm(clean, gcfg, small)
+
+
 class Cleaner:
     """Per-recording state on the GPU; ``prepare`` each frame, then ``clean`` each centre."""
 
@@ -203,8 +215,7 @@ class Cleaner:
         self.fill = ops.Filler(
             t(cv2.resize(boxes.astype(np.uint8), small, interpolation=nearest) > 0)
         )
-        warm = compile_is_warm(f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}")
-        compile_flow = gcfg.fast is True and (gcfg.fast_cold or warm)
+        compile_flow = gcfg.fast is True and (gcfg.fast_cold or flow_is_warm(clean, gcfg, small))
         self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device, compile_flow)
         self.curve = t(curve.astype(np.float32))
         ys, xs = torch.meshgrid(
@@ -1102,7 +1113,12 @@ Stage = Callable[[str], None]  # what the clean is doing, before the first frame
 # number in this call (from 0).
 Picture = Callable[[bytes, bytes, int], None]
 FAST_MIN_SECONDS = 10.0  # shorter clips do not earn back the accelerators' start-up
-FAST_COLD_SECONDS = 540.0  # a first compile (about 95 s) pays back from about 9 minutes
+# The first compile of a picture size takes about 95 s and the compiled update loop saves about
+# 2.3 ms a frame (8 s a minute at 60 fps), so one run pays it back only after about 11 minutes.
+# It is done anyway for any clip of 2 minutes or more (a flight): the compile is kept per
+# picture size, GPU, driver and software, so every later clean of that size starts in seconds.
+FAST_COLD_SECONDS = 120.0
+COMPILE_NOTICE = "Preparing the GPU for this picture size (about 1.5 minutes, first time only)"
 
 
 def _with_speedups(gcfg: GpuConfig, info: VideoInfo, opts: Options) -> GpuConfig:
@@ -1110,8 +1126,10 @@ def _with_speedups(gcfg: GpuConfig, info: VideoInfo, opts: Options) -> GpuConfig
     if gcfg.fast is not None or gcfg.learned is None:
         return gcfg
     seconds = opts.duration if opts.duration is not None else info.duration
-    fast = compile_available() and seconds >= FAST_MIN_SECONDS
-    return replace(gcfg, fast=fast, fast_cold=seconds >= FAST_COLD_SECONDS)
+    # ANAHD_COMPILE_MIN_SECONDS moves the 2-minute line (tests and timing runs on short clips).
+    line = float(os.environ.get("ANAHD_COMPILE_MIN_SECONDS", FAST_COLD_SECONDS))
+    fast = compile_available() and seconds >= min(FAST_MIN_SECONDS, line)
+    return replace(gcfg, fast=fast, fast_cold=seconds >= line)
 
 
 PINNED_SLOTS = 4  # frames in flight to the GPU on the sync-free upload
@@ -1143,7 +1161,10 @@ def enhance(
     if measured is None:
         say("Measuring the picture area and OSD")
     meas = measured or measure(src, info, opts)
-    say("Loading the models")
+    if needs_first_compile(opts.clean, gcfg, meas.crop):
+        say(COMPILE_NOTICE)
+    else:
+        say("Loading the models")
     params = opts.remaster
     cleaner = Cleaner(
         meas.crop,
