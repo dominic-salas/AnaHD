@@ -68,6 +68,7 @@ from anahd.app.preview import Preview, Wipe
 from anahd.app.remaster_panel import RemasterPanel
 from anahd.app.speed import calibrate, costs, estimate
 from anahd.app.timeline import Timeline, kept_seconds
+from anahd.app.trtnotice import TensorRTNotice
 from anahd.app.worker import Runner
 from anahd.cli import default_output, is_output, part_outputs
 from anahd.cuts import Cut, Span, keep_spans, output_to_source
@@ -498,6 +499,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(header)
+        layout.addWidget(TensorRTNotice(self._settings))
         layout.addWidget(self._pages, 1)
         layout.addWidget(footer)
         self.setCentralWidget(central)

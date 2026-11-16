@@ -60,7 +60,7 @@ begin
   begin
     Data := ExpandConstant('{localappdata}\AnaHD');
     if DirExists(Data) and (not UninstallSilent) then
-      if MsgBox('Also remove AnaHD''s model cache (' + Data + ')? ' +
+      if MsgBox('Also remove AnaHD''s model cache and TensorRT download (' + Data + ')? ' +
                 'Your videos are not affected.', mbConfirmation, MB_YESNO) = IDYES then
         DelTree(Data, True, True, True);
   end;

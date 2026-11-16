@@ -21,7 +21,7 @@ dependencies = [
 # The desktop app (anahd-app). Qt for Python, LGPL-3.0, used as an unmodified library.
 app = ["PySide6-Essentials>=6.10"]
 # --no-learned --ai: spandrel loads the SPAN upscaler; TensorRT runs it fast enough.
-ai = ["spandrel>=0.4", "onnx>=1.16", "tensorrt-cu12>=10"]
+ai = ["spandrel>=0.4", "onnx>=1.16", "tensorrt-cu12==10.15.*"]
 # Retraining only (anahd.learn): what the SeedVR2 teacher CLI needs. The SeedVR2 code and
 # its weights are an outside checkout; anahd itself never imports any of this.
 train = [
