@@ -39,11 +39,12 @@ wheels = [
 
 [[package]]
 name = "anahd"
-version = "0.1.5"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "onnx" },
     { name = "opencv-python-headless" },
     { name = "spandrel" },
     { name = "torch" },
@@ -53,7 +54,6 @@ dependencies = [
 
 [package.optional-dependencies]
 ai = [
-    { name = "onnx" },
     { name = "tensorrt-cu12" },
 ]
 app = [
@@ -89,7 +89,7 @@ requires-dist = [
     { name = "gguf", marker = "extra == 'train'", specifier = ">=0.10" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "omegaconf", marker = "extra == 'train'", specifier = ">=2.3" },
-    { name = "onnx", marker = "extra == 'ai'", specifier = ">=1.16" },
+    { name = "onnx", specifier = ">=1.16" },
     { name = "opencv-python-headless", specifier = ">=4.10,<6" },
     { name = "peft", marker = "extra == 'train'", specifier = ">=0.17" },
     { name = "psutil", marker = "extra == 'train'", specifier = ">=5.9" },

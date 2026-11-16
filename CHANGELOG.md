@@ -1,7 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## 0.2.0 (2026-11-16)
 
+- The installer now carries what TensorRT and compiling need to work in the installed app (ONNX, the SPAN loader, Triton's own files), so the downloaded TensorRT is really used there.
 - **HDZero recordings are left out of cleaning.** A recording at 90 fps or with a 1920x1080
   picture is an HDZero digital recording, and is now recognised as such even when the
   OSD finder sees "OSD" in it. It is listed as "HDZero digital recording" and can still be
