@@ -14,8 +14,7 @@ runs on your PC.
 <p align="center"><img src="docs/before_after_detail.png" alt="Plain upscale (left) and AnaHD (right), 1:1 detail"></p>
 
 Left: the recording's picture area upscaled with plain Lanczos. Right: AnaHD. Same frame of a
-daytime flight, with a breakup band across the lower third. Lower: a 1:1 crop of that
-frame at 1920x1440.
+daytime flight at 1920x1440 (4:3). Lower: a 1:1 crop of that frame, bare branches included.
 
 > **Built for one pilot's gear.** AnaHD is a personal tool, shared as is. Its learned
 > model was trained on one camera, one video link and one DVR, so on your footage it may

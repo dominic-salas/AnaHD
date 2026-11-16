@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+- **The picture area is found from frames that hold a picture.** Black frames and static or
+  noise screens no longer count when AnaHD looks for the black bars, so a recording that
+  spends most of its time in breakup keeps its 4:3 picture instead of being taken as full
+  frame. A recording whose camera was in a full-frame mode throughout still comes out full frame.
+- **A quiet suggestion for the RaceCam R1 Mini.** A 4:3 recording at 50 fps looks like a camera
+  the Learned cleaning was not trained on (it smears fine detail such as bare branches), so
+  the app says Classic may keep fine detail better. It only suggests; nothing is switched.
+- The README's before/after pictures are regenerated from the 1440-line output.
+
 ## 0.2.0 (2026-11-16)
 
 - The installer now carries what TensorRT and compiling need to work in the installed app (ONNX, the SPAN loader, Triton's own files), so the downloaded TensorRT is really used there.
