@@ -26,6 +26,17 @@ log = logging.getLogger(__name__)
 COMPILE_MODE = "max-autotune-no-cudagraphs"  # graphs are captured around the compiled code
 
 
+_build_notice: Callable[[str], None] | None = None
+BUILD_NOTICE = "Preparing TensorRT for this picture size (first time only)"
+
+
+def set_build_notice(say: Callable[[str], None] | None) -> None:
+    """Hear ``BUILD_NOTICE`` whenever an engine is about to be built (never for one that is
+    loaded from the cache)."""
+    global _build_notice
+    _build_notice = say
+
+
 def cache_dir() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".cache")
     return Path(base) / "AnaHD"
@@ -48,6 +59,8 @@ class Engine:
         path = finder.engine_cache_dir(gpu) / f"{key}.engine"
         log_ = trt.Logger(trt.Logger.ERROR)
         if not path.is_file():
+            if _build_notice is not None:
+                _build_notice(BUILD_NOTICE)
             path.parent.mkdir(parents=True, exist_ok=True)
             onnx = path.with_suffix(".onnx")
             with torch.inference_mode():
@@ -93,12 +106,13 @@ def build_engine(model: nn.Module, example: Tensor, key: str) -> Engine | None:
 
 
 def compile_available() -> bool:
-    """Compiling needs Triton and a CUDA GPU (on Windows the triton-windows wheel brings its
-    own C compiler); ``ANAHD_NO_COMPILE=1`` turns it off."""
-    if os.environ.get("ANAHD_NO_COMPILE") or not torch.cuda.is_available():
+    """Compiling is off unless ``ANAHD_COMPILE=1`` (a test option: on a 3-minute flight it
+    measured no faster than TensorRT alone, and the installed app does not carry Triton).
+    It needs Triton and a CUDA GPU."""
+    if os.environ.get("ANAHD_COMPILE") != "1" or not torch.cuda.is_available():
         return False
     try:
-        import triton  # type: ignore[import-untyped, unused-ignore]  # noqa: F401
+        import triton  # type: ignore[import-untyped, import-not-found, unused-ignore]  # noqa: F401
     except ImportError:
         return False
     return True
@@ -134,15 +148,44 @@ def maybe_compile(fn: Callable[..., Any], enabled: bool) -> Callable[..., Any]:
     return Compiled(fn) if enabled else fn
 
 
+def compile_stamp() -> str:
+    """What the compiled code in the cache was made for: this GPU and driver, torch and
+    triton, and this AnaHD. The same stamp finds it again; any change recompiles once."""
+    import hashlib
+
+    from anahd import __version__
+    from anahd.gpu import trt as finder
+
+    try:
+        import triton  # type: ignore[import-untyped, import-not-found, unused-ignore]
+
+        triton_version = str(triton.__version__)
+    except ImportError:
+        triton_version = "none"
+    try:
+        gpu = torch.cuda.get_device_name() if torch.cuda.is_available() else "nogpu"
+    except Exception:
+        gpu = "nogpu"
+    raw = "|".join((gpu, finder._driver(), torch.__version__, triton_version, __version__))
+    return hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def _marker(tag: str) -> Path:
+    """Kept inside the inductor cache folder it describes, so emptying one empties both."""
+    use_compile_cache()
+    return Path(os.environ["TORCHINDUCTOR_CACHE_DIR"]) / f"{tag}.{compile_stamp()}.warm"
+
+
 def compile_is_warm(tag: str) -> bool:
-    """Whether ``tag`` (a network and picture size) was compiled before, so its compile
-    cache is there and starting it costs about two seconds instead of a minute and a half."""
-    return (cache_dir() / "inductor" / f"{tag}.warm").is_file()
+    """Whether ``tag`` (a network and picture size) was compiled before on this GPU, driver
+    and software, so its compile cache is there and starting it costs about two seconds
+    instead of a minute and a half."""
+    return _marker(tag).is_file()
 
 
 def mark_compiled(tag: str, fn: Callable[..., Any]) -> None:
     if getattr(fn, "failed", True):
         return
-    marker = cache_dir() / "inductor" / f"{tag}.warm"
+    marker = _marker(tag)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()

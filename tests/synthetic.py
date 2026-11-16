@@ -87,6 +87,24 @@ def damaged(i: int) -> bool:
     return i % BAND_EVERY == BAND_EVERY // 2
 
 
+# Sharp by default, which the cleaning tests are calibrated on (and which a digital link's
+# picture also is). 576, the analog signal's own line count (PAL), upscaled by the DVR, makes
+# detail and noise band-limited like a real analog recording (tests/test_origin.py).
+ANALOG_LINES: int | None = None  # set to 576 for a recording that also looks analog to the detector
+
+
+def band_limit(ycc: NDArray[np.float64], lines: int | None) -> NDArray[np.float64]:
+    """The picture as an analog signal of ``lines`` lines carries it, upscaled back: noise
+    and detail are band-limited together (an analog recording is never sharp to the pixel)."""
+    if lines is None:
+        return ycc
+    h, w = ycc.shape[:2]
+    small = cv2.resize(
+        ycc.astype(np.float32), (w * lines // h, lines), interpolation=cv2.INTER_AREA
+    )
+    return np.asarray(cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR), np.float64)
+
+
 def dvr_frame(i: int, rng: np.random.Generator) -> NDArray[np.uint8]:
     """What the DVR records for frame ``i``: 1280x720 BGR."""
     pic = cv2.resize(clean_frame(i), (PIC_W, PIC_H), interpolation=cv2.INTER_AREA)
@@ -96,6 +114,7 @@ def dvr_frame(i: int, rng: np.random.Generator) -> NDArray[np.uint8]:
     ycc[..., 0] += rng.normal(0, NOISE_SIGMA, (PIC_H, PIC_W))
     chroma = cv2.resize(rng.normal(0, 6, (PIC_H // 2, PIC_W // 2, 2)), (PIC_W, PIC_H))
     ycc[..., 1:] += chroma
+    ycc = band_limit(ycc, ANALOG_LINES)
     if damaged(i):  # a breakup band: rows of snow, shifted picture and colour garbage
         r0, r1 = BAND_ROWS
         ycc[r0:r1, :, 0] = rng.uniform(20, 235, (r1 - r0, PIC_W))
@@ -238,9 +257,14 @@ def wide_truth(i: int) -> NDArray[np.uint8]:
 
 
 def degrade(
-    truth: NDArray[np.uint8], layout: Layout, rng: np.random.Generator, band: bool
+    truth: NDArray[np.uint8],
+    layout: Layout,
+    rng: np.random.Generator,
+    band: bool,
+    lines: int | None = ANALOG_LINES,
 ) -> NDArray[np.uint8]:
-    """What the DVR stores for a clean frame: reduced, softened, noisy, maybe a band."""
+    """What the DVR stores for a clean frame: reduced, softened, noisy, maybe a band.
+    ``lines``: the analog signal's own line count (576), upscaled to the DVR's picture."""
     w, h = layout.pic_w, layout.pic_h
     pic = cv2.resize(truth, (w, h), interpolation=cv2.INTER_AREA)
     pic = cv2.GaussianBlur(pic.astype(np.float32), (0, 0), sigmaX=1.0, sigmaY=0.5)
@@ -248,6 +272,7 @@ def degrade(
     ycc: NDArray[np.float64] = ycc8.astype(np.float64)
     ycc[..., 0] += rng.normal(0, NOISE_SIGMA, (h, w))
     ycc[..., 1:] += cv2.resize(rng.normal(0, 6, (h // 2, w // 2, 2)), (w, h))
+    ycc = band_limit(ycc, lines)
     if band:
         r0, r1 = BAND_ROWS
         ycc[r0:r1, :, 0] = rng.uniform(20, 235, (r1 - r0, w))
@@ -267,10 +292,11 @@ def write_with(
     fps: int = FPS,
     sar: str | None = None,
     mjpeg: bool = False,
+    lines: int | None = ANALOG_LINES,
 ) -> Clip:
     """Encode a recording of ``truth`` (no breakup bands) like :func:`write`. ``sar``
     tags the pixel shape (e.g. "10/11"); ``mjpeg`` records like older analog DVRs: MJPEG
-    in 4:2:2, full range."""
+    in 4:2:2, full range; ``lines``: see :func:`degrade`."""
     rng = np.random.default_rng(1)
     cmd = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24"]
     cmd += ["-s", f"{layout.dvr_w}x{layout.dvr_h}", "-r", str(fps), "-i", "-"]
@@ -284,7 +310,7 @@ def write_with(
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     assert proc.stdin is not None
     for i in range(frames):
-        proc.stdin.write(degrade(truth(i), layout, rng, band=False).tobytes())
+        proc.stdin.write(degrade(truth(i), layout, rng, band=False, lines=lines).tobytes())
     proc.stdin.close()
     if proc.wait() != 0:
         raise RuntimeError("ffmpeg could not write the synthetic clip")

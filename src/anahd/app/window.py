@@ -73,7 +73,7 @@ from anahd.app.worker import Runner
 from anahd.cli import default_output, is_output, part_outputs
 from anahd.cuts import Cut, Span, keep_spans, output_to_source
 from anahd.media import Crop
-from anahd.origin import Origin
+from anahd.origin import HDZERO_NOTE, Origin
 from anahd.remaster import RemasterParams
 
 VIDEO = {".mp4", ".ts", ".mov", ".avi", ".mkv", ".m2ts", ".mts"}
@@ -103,6 +103,8 @@ class Clip:
     outputs: list[Path] = field(default_factory=list)  # every file it was cleaned into
     skip: bool = False  # looks digital: left out of CLEAN unless included
     origin: Origin | None = None
+    hint: str = ""  # a quiet suggestion about the cleaning mode for this recording
+    as_analog: bool = False  # an HDZero-looking clip the user chose to clean as analog
     params: RemasterParams | None = None  # the settings it was cleaned with
     learned: bool = True  # cleaned with the learned engine (else the classic one)
 
@@ -264,6 +266,7 @@ class MainWindow(QMainWindow):
         self._reader.pair.connect(self._pair)
         self._reader.still.connect(self._still)
         self._reader.checked.connect(self._checked)
+        self._reader.hinted.connect(self._hinted)
         self._reader.start()
         self._player = PlayThread(self)
         self._player.frame.connect(self._played)
@@ -379,6 +382,10 @@ class MainWindow(QMainWindow):
         self._keeps = eyebrow()
         self._include = button("Include anyway", self._include_clip)
         self._include.setToolTip("Clean this clip although it looks digital")
+        self._as_analog = button("Clean as analog", self._clean_as_analog)
+        self._as_analog.setToolTip(
+            "Clean this HDZero recording with the analog repair and cleaning instead"
+        )
         self._editor = CutEditor(lambda: self._timeline.playhead)
         self._editor.changed.connect(self._timeline.set_cut)
         self._editor.deleted.connect(self._delete_cut)
@@ -406,6 +413,10 @@ class MainWindow(QMainWindow):
         live_layout.addWidget(self._live_caption, 1)
         live_layout.addWidget(self._live_stop)
         self._live_row.setVisible(False)
+        self._hint = QLabel()
+        self._hint.setProperty("role", "caption")
+        self._hint.setWordWrap(True)
+        self._hint.setVisible(False)
         self._live: dict[Path, tuple[bytes, bytes, int, int]] = {}  # latest picture per clip
         right = QWidget()
         rcol = QVBoxLayout(right)
@@ -414,9 +425,12 @@ class MainWindow(QMainWindow):
         rcol.addLayout(heading_row)
         rcol.addWidget(self._stage, 1)
         rcol.addWidget(self._live_row)
+        rcol.addWidget(self._hint)
         rcol.addWidget(self._timeline)
         rcol.addWidget(self._editor)
-        rcol.addLayout(row(self._play, self._time, 1, self._keeps, self._include, self._cut))
+        rcol.addLayout(
+            row(self._play, self._time, 1, self._keeps, self._include, self._as_analog, self._cut)
+        )
         self._panel = RemasterPanel()
         self._panel.set_params(self._saved_params())
         self._panel.changed.connect(self._params_changed)
@@ -731,7 +745,7 @@ class MainWindow(QMainWindow):
     def _stage_reported(self, path: Path, text: str) -> None:
         clip = self._clips.get(path)
         if clip is not None and clip.state == CLEANING and not clip.item.data(SHARE):
-            self._set_status(clip, f"{text}...", 0.0)
+            self._set_status(clip, text if text.endswith(")") else f"{text}...", 0.0)
             self._refresh()
 
     def _live_picture(self, path: Path, before: bytes, after: bytes, n: int, total: int) -> None:
@@ -939,25 +953,55 @@ class MainWindow(QMainWindow):
             self._set_status(clip, "Included (looks digital)")
             self._refresh()
 
+    def _clean_as_analog(self) -> None:
+        clip = self._selected()
+        if clip is not None and clip.editable and self._hdzero(clip):
+            clip.as_analog = True
+            self._set_status(clip, "Will be cleaned as analog")
+            clip.item.setToolTip("")
+            self._refresh()
+
+    @staticmethod
+    def _hdzero(clip: Clip) -> bool:
+        """Looks like HDZero and is not (yet) set to be cleaned as analog."""
+        return clip.origin is not None and clip.origin.hdzero and not clip.as_analog
+
     def _checked(self, path: Path, origin: Origin) -> None:
         clip = self._clips.get(path)
         if clip is None:
             return
         clip.origin = origin
-        if origin.digital and clip.state == WAITING:
+        if origin.hdzero and clip.state == WAITING:
+            self._set_status(clip, HDZERO_NOTE)
+            clip.item.setToolTip(
+                "The frame rate, picture size or detail matches an HDZero digital recording. "
+                "It has none of the analog damage, so it is upscaled and given the look "
+                "without the analog repair and cleaning. Select it and press Clean as analog "
+                "to clean it like an analog recording instead."
+            )
+        elif origin.digital and clip.state == WAITING:
             clip.skip = True
             self._set_status(clip, f"Looks digital ({origin.reasons}): left out", problem=True)
-            why = (
-                "The frame rate or picture size matches an HDZero digital recording."
-                if origin.hdzero
-                else "No OSD was found in this recording: analog goggle recordings have "
-                "the OSD burned in, digital ones don't."
-            )
             clip.item.setToolTip(
-                f"{why} AnaHD is made for analog video, so it is left out of Clean. "
-                "Select it and press Include anyway to clean it too."
+                "No OSD was found in this recording: analog goggle recordings have "
+                "the OSD burned in, digital ones don't. AnaHD is made for analog video, "
+                "so it is left out of Clean. Select it and press Include anyway to clean "
+                "it too."
             )
         self._refresh()
+
+    def _hinted(self, path: Path, hint: str) -> None:
+        clip = self._clips.get(path)
+        if clip is not None:
+            clip.hint = hint
+            self._show_hint()
+
+    def _show_hint(self) -> None:
+        """The suggestion for the selected clip, only while the Learned cleaning is chosen."""
+        clip = self._selected()
+        text = clip.hint if clip is not None and self._learned() else ""
+        self._hint.setText(text)
+        self._hint.setVisible(bool(text))
 
     def _cuts_changed(self, cuts: list[Cut]) -> None:
         clip = self._selected()
@@ -975,6 +1019,7 @@ class MainWindow(QMainWindow):
         editable = ready and clip is not None and clip.editable
         self._cut.setEnabled(editable)
         self._include.setVisible(clip is not None and clip.skip)
+        self._as_analog.setVisible(clip is not None and clip.editable and self._hdzero(clip))
         self._play.setEnabled(ready)
         if clip is None or not ready:
             self._keeps.setText("")
@@ -1035,6 +1080,9 @@ class MainWindow(QMainWindow):
         self._etas.pop(clip.path, None)
         self._set_status(clip, "Starting...", 0.0)
         clip.params, clip.learned = self._panel.params(), self._learned()
+        # An HDZero verdict sends the clip down the digital path (the user may override it);
+        # without one the worker decides from the recording itself.
+        route = () if clip.origin is None or not clip.origin.hdzero else (not clip.as_analog,)
         self._runner.start(
             clip.path,
             self._target(clip),
@@ -1042,6 +1090,7 @@ class MainWindow(QMainWindow):
             len(targets) > 1,
             self._learned(),
             clip.params.to_dict(),
+            *route,
         )
         if ended is not None and self._selected() is ended:
             self._select(clip)  # the user was watching: follow the batch
@@ -1285,6 +1334,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_result_buttons()
         self._update_cut_controls()
+        self._show_hint()
         self._remove.setEnabled(
             any(c.state not in (QUEUED, CLEANING) for c in self._selected_clips())
         )

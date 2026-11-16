@@ -126,6 +126,21 @@ def _parser() -> argparse.ArgumentParser:
         default=1.0,
         help="0 = repaired centre frame only, 1 = the restorer's full output",
     )
+    route = p.add_mutually_exclusive_group()
+    route.add_argument(
+        "--digital",
+        dest="digital",
+        action="store_true",
+        default=None,
+        help="a digital (HDZero) recording: upscale it without the analog repair and cleaning "
+        "(the default when the recording looks like HDZero)",
+    )
+    route.add_argument(
+        "--analog",
+        dest="digital",
+        action="store_false",
+        help="clean the recording as analog even if it looks like HDZero",
+    )
     p.add_argument("--nvenc", action="store_true", help="encode on the GPU (faster, softer)")
     p.add_argument(
         "--cpu",
@@ -217,6 +232,10 @@ def print_progress(done: int, total: int | None, rate: float) -> None:
             f"{rate:.1f} fps  {int(left // 60)}:{int(left % 60):02d} left"
         )
     print(f"\r{line}   ", end="", file=sys.stderr, flush=True)
+
+
+def print_stage(text: str) -> None:
+    print(f"{text}...", file=sys.stderr, flush=True)
 
 
 def part_outputs(out: Path, count: int) -> list[Path]:
@@ -467,6 +486,8 @@ def _clean(
 ) -> Result:
     hooks = hooks or Hooks()
     if args.cpu:
+        if args.digital:
+            raise AnaHDError("--digital runs on the GPU only; leave out --cpu")
         return enhance(
             src,
             tmp,
@@ -493,6 +514,7 @@ def _clean(
         gcfg=GpuConfig(
             ai=args.ai and not args.learned,
             repair=args.repair,
+            digital=args.digital,
             learned=model,
             learned_strength=args.learned_strength,
         ),
@@ -528,7 +550,7 @@ def join(parts: list[Path], out: Path) -> None:
 
 def run_one(src: Path, out: Path, args: argparse.Namespace) -> None:
     written = planned_outputs(src, out, args) if src.is_file() else [out]
-    result, took = render(src, out, args, print_progress)
+    result, took = render(src, out, args, print_progress, print_stage)
     names = ", ".join(str(w) for w in written)
     print(
         f"\r{names}: {result.frames} frames at {result.size[0]}x{result.size[1]} "

@@ -1,12 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
 ## 0.2.0 (2026-11-16)
 
-- The installer now carries what TensorRT and compiling need to work in the installed app (ONNX, the SPAN loader, Triton's own files), so the downloaded TensorRT is really used there.
-- **HDZero recordings are left out of cleaning.** A recording at 90 fps or with a 1920x1080
-  picture is an HDZero digital recording, and is now recognised as such even when the
-  OSD finder sees "OSD" in it. It is listed as "HDZero digital recording" and can still be
-  cleaned with Include anyway. 720p at 50 or 60 fps is judged as before, so a 720p60 HDZero recording (an HDZero Lux, for example) is not recognised yet and is cleaned as analog.
+- **Compiling is off.** Compiling the flow step (Triton) measured no faster than TensorRT
+  alone on a 3-minute flight (671 s against 651 s), took 95 s for each new picture size and
+  could not run in the installed app. It now runs only with `ANAHD_COMPILE=1` (a test
+  option), Triton is an optional extra (`compile`) instead of a dependency, and the installer
+  no longer carries it.
+- **TensorRT's first build is announced.** When an engine for a new picture size is being
+  built the status line says "Preparing TensorRT for this picture size (first time only)",
+  in the app and on the command line (which now prints each stage as it starts). Engines
+  already built are loaded without it.
+- **The picture area is found from frames that hold a picture.** Black frames and static or
+  noise screens no longer count when AnaHD looks for the black bars, so a recording that
+  spends most of its time in breakup keeps its 4:3 picture instead of being taken as full
+  frame. A recording whose camera was in a full-frame mode throughout still comes out full frame.
+- **A quiet suggestion for the RaceCam R1 Mini.** A 4:3 recording at 50 fps looks like a camera
+  the Learned cleaning was not trained on (it smears fine detail such as bare branches), so
+  the app says Classic may keep fine detail better. It only suggests; nothing is switched.
+- The README's before/after pictures are regenerated from the 1440-line output.
+- **HDZero recordings are upscaled, not left out.** A recording judged HDZero skips the
+  analog repair and cleaning (no alignment, no breakup repair, no restorer, no C03 lens or
+  analog colour corrections) and keeps the 2x upscale to 1440 lines and the default look.
+  The clip list says "HDZero digital recording: upscaled without analog cleaning", and
+  "Clean as analog" (or `--analog` on the command line) cleans it the old way. `--digital`
+  forces the new path.
+- **HDZero at 720p60 is recognised from the picture.** An HDZero recording and an analog
+  DVR file are both 1280x720 at 60 fps, so the picture decides: HDZero carries detail close
+  to the pixel grid, an analog picture is band-limited. Checked on 111 labelled analog and 45 HDZero recordings; it
+  is tuned to call no analog flight digital, so a dark or blurry HDZero clip can still be
+  cleaned as analog.
+
+- HDZero recordings at 90 fps or 1920x1080 are recognised from the file alone.
 - **TensorRT is found and used when present.** AnaHD looks for NVIDIA's free TensorRT
   (10.15, CUDA 12) next to its own install and in your AnaHD folder, and runs without it
   when it is missing. It is too big for the installer (about 2.2 GB), so the app shows a
