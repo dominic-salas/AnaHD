@@ -34,7 +34,7 @@ def test_a_sharp_720p60_clip_takes_the_digital_path_by_itself(tmp_path: Path) ->
     """Routed from the recording (digital=None), forced digital, and forced analog: the first
     two are the same bytes, the analog one is cleaned (breakup repair on) and differs."""
     clip = syn.write_with(
-        tmp_path / "hdzero.mp4", 60, syn.without_osd(syn.WIDE, speed=10), syn.WIDE
+        tmp_path / "hdzero.mp4", 60, syn.without_osd(syn.WIDE, speed=10), syn.WIDE, lines=None
     )
     assert probe(clip.path).fps == "60/1"
     made = {}

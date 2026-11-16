@@ -19,10 +19,10 @@ def _judge(
     truth: object,
     layout: syn.Layout,
     *,
-    lines: int | None = 480,
+    lines: int | None = 576,
     fps: int = syn.FPS,
 ) -> Origin:
-    """``lines``: 480 upscaled, like an analog goggle's recording; None: sharp, as a digital
+    """``lines``: 576 upscaled, like an analog goggle's recording; None: sharp, as a digital
     link's picture is."""
     clip = syn.write_with(tmp_path / "rec.mp4", 120, truth, layout, lines=lines, fps=fps)  # type: ignore[arg-type]
     info = probe(clip.path)
