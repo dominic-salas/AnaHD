@@ -28,8 +28,8 @@ frame at 1440x1080.
 **[Download the latest installer](https://github.com/dominic-salas/AnaHD/releases/latest)**
 (`AnaHD-<version>-setup.exe`, under Assets) and run it. It installs for your user (no
 admin rights), offers a desktop shortcut and a Start-menu entry with an uninstaller, and
-brings everything it needs: FFmpeg, PyTorch's CUDA libraries and the model. Nothing else
-is downloaded.
+brings everything it needs to run: FFmpeg, PyTorch's CUDA libraries and the model.
+TensorRT (below) is the one optional extra and is not part of the installer.
 
 **Needs**
 - Windows 10 or 11, 64-bit.
@@ -37,6 +37,15 @@ is downloaded.
   and a current driver (one that supports CUDA 12.8). Older cards such as the GTX 10
   series are not supported; AnaHD says so instead of starting. Only an RTX 4070 Ti has
   been tested; PyTorch used at most 1.2 GB of graphics memory there.
+- Recommended, free: **NVIDIA TensorRT 10.15** for CUDA 12 (the build that goes with the
+  app's CUDA 12.8 PyTorch). It makes the GPU steps that support it faster. Without it
+  AnaHD runs the same steps in plain PyTorch, with the same picture, just slower; nothing
+  is blocked. It is about 2.2 GB, too big for the installer, so the app shows a "Download
+  TensorRT" button under its header that fetches it from NVIDIA into your own AnaHD folder
+  (`%LOCALAPPDATA%\AnaHD	ensorrt`, no admin rights). You can also get it from
+  [NVIDIA's TensorRT page](https://developer.nvidia.com/tensorrt-getting-started)
+  (download the CUDA 12 build, version 10.15). The first time a step uses it, it builds a
+  GPU-specific engine (about a minute) and keeps it for later clips.
 - About 7 GB of free memory (RAM plus page file) while a clip is cleaned. Games and
   virtual machines running at the same time can use that up; AnaHD then retries the clip
   once and tells you if it still could not finish.
@@ -212,6 +221,7 @@ With [uv](https://docs.astral.sh/uv/) and FFmpeg on PATH:
 ```
 git clone https://github.com/dominic-salas/AnaHD && cd AnaHD
 uv sync --extra app          # PyTorch with CUDA (~4 GB), PySide6, dev tools
+uv sync --extra app --extra ai   # the same plus TensorRT 10.15 (pip `tensorrt-cu12`)
 uv run anahd-app             # the app; or: uv run anahd flight.mp4
 uv run pytest                # ~10 min with a GPU; GPU tests skip without one
 uv run ruff check . && uv run mypy

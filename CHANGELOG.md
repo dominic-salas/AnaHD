@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+- **TensorRT is found and used when present.** AnaHD looks for NVIDIA's free TensorRT
+  (10.15, CUDA 12) next to its own install and in your AnaHD folder, and runs without it
+  when it is missing. It is too big for the installer (about 2.2 GB), so the app shows a
+  quiet strip with a "Download TensorRT" button that fetches it from NVIDIA; the README
+  lists it as a recommended requirement with the download link. Built engines are cached
+  per graphics card, driver and TensorRT version.
+
 ## 0.1.5 (2026-11-09)
 
 - **AnaHD can open inside okFPV.** okFPV's AnaHD tab now shows AnaHD in its own window,
