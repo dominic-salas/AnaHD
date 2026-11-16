@@ -6,7 +6,7 @@
 - **HDZero recordings are left out of cleaning.** A recording at 90 fps or with a 1920x1080
   picture is an HDZero digital recording, and is now recognised as such even when the
   OSD finder sees "OSD" in it. It is listed as "HDZero digital recording" and can still be
-  cleaned with Include anyway. 720p at 50 or 60 fps is judged as before.
+  cleaned with Include anyway. 720p at 50 or 60 fps is judged as before, so a 720p60 HDZero recording (an HDZero Lux, for example) is not recognised yet and is cleaned as analog.
 - **TensorRT is found and used when present.** AnaHD looks for NVIDIA's free TensorRT
   (10.15, CUDA 12) next to its own install and in your AnaHD folder, and runs without it
   when it is missing. It is too big for the installer (about 2.2 GB), so the app shows a
