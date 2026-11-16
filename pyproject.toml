@@ -52,6 +52,7 @@ build = [
     "pyinstaller>=6.16",  # the standalone Windows app (scripts/build_windows.py)
 ]
 dev = [
+    "pytest-timeout>=2.3",  # a hung test fails instead of running forever
     "PySide6-Essentials>=6.10",  # app tests and type checks
     "mypy>=1.15",
     "pytest>=8.3",
@@ -90,6 +91,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers"]
+# The slowest test (a full end-to-end render) takes about 4 minutes on an RTX 4070 Ti; a
+# test still running after 10 minutes is stuck (GPU contention, a hung decoder) and fails.
+timeout = 600
 markers = [
     "gpu: needs torch and a CUDA GPU (skipped otherwise)",
     "slow: end-to-end renders, about a minute (deselect with -m \"not slow\")",
