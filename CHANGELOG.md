@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.2.0 (2026-11-16)
+
 - **Compiling is off.** Compiling the flow step (Triton) measured no faster than TensorRT
   alone on a 3-minute flight (671 s against 651 s), took 95 s for each new picture size and
   could not run in the installed app. It now runs only with `ANAHD_COMPILE=1` (a test
@@ -31,13 +33,7 @@
   is tuned to call no analog flight digital, so a dark or blurry HDZero clip can still be
   cleaned as analog.
 
-## 0.2.0 (2026-11-16)
-
-- The installer now carries what TensorRT and compiling need to work in the installed app (ONNX, the SPAN loader, Triton's own files), so the downloaded TensorRT is really used there.
-- **HDZero recordings are left out of cleaning.** A recording at 90 fps or with a 1920x1080
-  picture is an HDZero digital recording, and is now recognised as such even when the
-  OSD finder sees "OSD" in it. It is listed as "HDZero digital recording" and can still be
-  cleaned with Include anyway. 720p at 50 or 60 fps is judged as before, so a 720p60 HDZero recording (an HDZero Lux, for example) is not recognised yet and is cleaned as analog.
+- HDZero recordings at 90 fps or 1920x1080 are recognised from the file alone.
 - **TensorRT is found and used when present.** AnaHD looks for NVIDIA's free TensorRT
   (10.15, CUDA 12) next to its own install and in your AnaHD folder, and runs without it
   when it is missing. It is too big for the installer (about 2.2 GB), so the app shows a
