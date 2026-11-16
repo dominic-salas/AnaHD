@@ -42,6 +42,10 @@ class PictureConfig:
     static_edge: int = 25
     max_overlay_box: float = 0.03  # larger static regions are scenery (props, frame arms)
     min_overlay_pixels: int = 30
+    # A frame with no picture in it (a black frame, rolling grey noise, a static screen)
+    # says nothing about where the picture is: its coarse brightness barely varies, while
+    # a real picture, even with bars, varies a lot.
+    picture_spread: float = 12.0
 
 
 def detect_crop(frames: list[Plane], config: PictureConfig | None = None) -> Crop:
@@ -51,6 +55,7 @@ def detect_crop(frames: list[Plane], config: PictureConfig | None = None) -> Cro
     whole = Crop(0, 0, width, height)
     if len(frames) < 2:
         return whole
+    frames = picture_frames(frames, config)
     stack = np.stack(frames).astype(np.float32)
     columns = _active_profile(stack, axis=1, config=config)
     rows = _active_profile(stack, axis=2, config=config)
@@ -65,6 +70,19 @@ def detect_crop(frames: list[Plane], config: PictureConfig | None = None) -> Cro
     ):
         return whole
     return Crop(x0, y0, x1 - x0, y1 - y0)
+
+
+def picture_frames(frames: list[Plane], config: PictureConfig | None = None) -> list[Plane]:
+    """The frames that hold a picture: not black, not static or noise screens. Those would
+    outvote the picture when a recording spends most of its time in breakup. If fewer than
+    two remain, every frame is returned (nothing reliable to go on)."""
+    config = config or PictureConfig()
+    kept = [
+        f
+        for f in frames
+        if cv2.resize(f, (40, 22), interpolation=cv2.INTER_AREA).std() >= config.picture_spread
+    ]
+    return kept if len(kept) >= 2 else frames
 
 
 def _active_profile(stack: NDArray[np.float32], *, axis: int, config: PictureConfig) -> BoolMask:

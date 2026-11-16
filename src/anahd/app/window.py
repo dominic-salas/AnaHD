@@ -103,6 +103,7 @@ class Clip:
     outputs: list[Path] = field(default_factory=list)  # every file it was cleaned into
     skip: bool = False  # looks digital: left out of CLEAN unless included
     origin: Origin | None = None
+    hint: str = ""  # a quiet suggestion about the cleaning mode for this recording
     params: RemasterParams | None = None  # the settings it was cleaned with
     learned: bool = True  # cleaned with the learned engine (else the classic one)
 
@@ -264,6 +265,7 @@ class MainWindow(QMainWindow):
         self._reader.pair.connect(self._pair)
         self._reader.still.connect(self._still)
         self._reader.checked.connect(self._checked)
+        self._reader.hinted.connect(self._hinted)
         self._reader.start()
         self._player = PlayThread(self)
         self._player.frame.connect(self._played)
@@ -406,6 +408,10 @@ class MainWindow(QMainWindow):
         live_layout.addWidget(self._live_caption, 1)
         live_layout.addWidget(self._live_stop)
         self._live_row.setVisible(False)
+        self._hint = QLabel()
+        self._hint.setProperty("role", "caption")
+        self._hint.setWordWrap(True)
+        self._hint.setVisible(False)
         self._live: dict[Path, tuple[bytes, bytes, int, int]] = {}  # latest picture per clip
         right = QWidget()
         rcol = QVBoxLayout(right)
@@ -414,6 +420,7 @@ class MainWindow(QMainWindow):
         rcol.addLayout(heading_row)
         rcol.addWidget(self._stage, 1)
         rcol.addWidget(self._live_row)
+        rcol.addWidget(self._hint)
         rcol.addWidget(self._timeline)
         rcol.addWidget(self._editor)
         rcol.addLayout(row(self._play, self._time, 1, self._keeps, self._include, self._cut))
@@ -959,6 +966,19 @@ class MainWindow(QMainWindow):
             )
         self._refresh()
 
+    def _hinted(self, path: Path, hint: str) -> None:
+        clip = self._clips.get(path)
+        if clip is not None:
+            clip.hint = hint
+            self._show_hint()
+
+    def _show_hint(self) -> None:
+        """The suggestion for the selected clip, only while the Learned cleaning is chosen."""
+        clip = self._selected()
+        text = clip.hint if clip is not None and self._learned() else ""
+        self._hint.setText(text)
+        self._hint.setVisible(bool(text))
+
     def _cuts_changed(self, cuts: list[Cut]) -> None:
         clip = self._selected()
         if clip is not None and clip.editable:
@@ -1285,6 +1305,7 @@ class MainWindow(QMainWindow):
         )
         self._refresh_result_buttons()
         self._update_cut_controls()
+        self._show_hint()
         self._remove.setEnabled(
             any(c.state not in (QUEUED, CLEANING) for c in self._selected_clips())
         )

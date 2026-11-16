@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from anahd.app.camerahint import hint_for
 from anahd.errors import AnaHDError
 from anahd.media import NO_WINDOW, Crop, probe, require
 from anahd.origin import judge
@@ -58,6 +59,7 @@ class FrameReader(QThread):
 
     probed = Signal(object, bytes)  # Probed, thumbnail PNG (may be empty)
     checked = Signal(object, object)  # path, Origin
+    hinted = Signal(object, str)  # path, suggestion for the cleaning mode (may be empty)
     failed = Signal(object, str)  # path, why
     pair = Signal(object)  # Pair
     still = Signal(object)  # Still
@@ -131,6 +133,7 @@ class FrameReader(QThread):
         meas = measure(path, info, Options())
         self._crops.setdefault(path, meas.crop)
         self.checked.emit(path, judge(info, meas))
+        self.hinted.emit(path, hint_for(info, meas.size))
 
     def _probe(self, path: Path) -> None:
         info = probe(path)
