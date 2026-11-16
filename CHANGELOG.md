@@ -2,15 +2,15 @@
 
 ## [Unreleased]
 
-- **Flights of 2 minutes or more get the compiled flow step.** The first clean of each
-  picture size now spends about 1.5 minutes preparing the GPU (the status line says so, in
-  the app and on the command line) and saves about 2.3 ms a frame from then on. Before, only
-  clips of 9 minutes or more, or sizes already prepared, got it. What was prepared is kept
-  per picture size, graphics card, driver, torch, Triton and AnaHD version, so every later
-  clean of that size starts in seconds; a failed compile leaves nothing behind and the plain
-  path runs. The command line now prints each stage as it starts. The installed app skips
-  the compile when Triton cannot find the CUDA files and Python's library next to it
-  (they are not in the 0.2.0 installer), so it no longer waits to fail.
+- **Compiling is off.** Compiling the flow step (Triton) measured no faster than TensorRT
+  alone on a 3-minute flight (671 s against 651 s), took 95 s for each new picture size and
+  could not run in the installed app. It now runs only with `ANAHD_COMPILE=1` (a test
+  option), Triton is an optional extra (`compile`) instead of a dependency, and the installer
+  no longer carries it.
+- **TensorRT's first build is announced.** When an engine for a new picture size is being
+  built the status line says "Preparing TensorRT for this picture size (first time only)",
+  in the app and on the command line (which now prints each stage as it starts). Engines
+  already built are loaded without it.
 
 ## 0.2.0 (2026-11-16)
 

@@ -3,7 +3,6 @@ clean never fails because TensorRT or the compiler cannot run), and when they ar
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -66,33 +65,63 @@ def test_compile_failure_runs_the_plain_function(monkeypatch: pytest.MonkeyPatch
     assert f(2) == 3  # and stays on the plain path
 
 
+def _decide(seconds: float, config: GpuConfig | None = None) -> GpuConfig:
+    info = VideoInfo(1280, 720, "60/1", False, False, seconds)
+    return _with_speedups(config or GpuConfig(learned=Path("m.pt")), info, Options())
+
+
 def test_accelerators_are_for_clips_that_earn_back_their_start_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("anahd.gpu.pipeline.compile_available", lambda: True)
-    info = VideoInfo(1280, 720, "60/1", False, False, 0.0)
-    cfg = GpuConfig(learned=Path("m.pt"))
-
-    def decide(seconds: float, config: GpuConfig = cfg) -> GpuConfig:
-        return _with_speedups(config, replace(info, duration=seconds), Options())
-
-    assert decide(FAST_MIN_SECONDS - 1).fast is False
-    assert decide(FAST_MIN_SECONDS + 1).fast is True and not decide(FAST_MIN_SECONDS + 1).fast_cold
-    assert decide(FAST_COLD_SECONDS + 1).fast_cold
-    assert decide(300, replace(cfg, fast=False)).fast is False  # an explicit choice stays
-    assert decide(300, GpuConfig()).fast is None  # the classic path is left alone
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.delenv("ANAHD_COMPILE", raising=False)
+    assert _decide(FAST_MIN_SECONDS - 1).fast is False
+    assert _decide(FAST_MIN_SECONDS + 1).fast is True
+    assert not _decide(FAST_COLD_SECONDS + 1).fast_cold  # compiling is off by default
+    assert _decide(300, GpuConfig(learned=Path("m.pt"), fast=False)).fast is False
+    assert _decide(300, GpuConfig()).fast is None  # the classic path is left alone
 
 
-def test_a_flight_gets_the_compile_and_a_short_clip_does_not(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("anahd.gpu.pipeline.compile_available", lambda: True)
+def test_compiling_runs_only_when_asked_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    pytest.importorskip("triton")
+    monkeypatch.delenv("ANAHD_COMPILE", raising=False)
     monkeypatch.delenv("ANAHD_COMPILE_MIN_SECONDS", raising=False)
-    info = VideoInfo(1280, 720, "60/1", False, False, 0.0)
-    cfg = GpuConfig(learned=Path("m.pt"))
-    for seconds, cold in ((60, False), (180, True), (300, True)):
-        got = _with_speedups(cfg, replace(info, duration=seconds), Options())
-        assert got.fast_cold is cold, seconds
+    assert not engine.compile_available()
+    monkeypatch.setenv("ANAHD_COMPILE", "1")
+    assert engine.compile_available()
+    assert not _decide(FAST_COLD_SECONDS - 1).fast_cold
+    assert _decide(FAST_COLD_SECONDS + 1).fast_cold
+
+
+def test_the_tensorrt_notice_is_for_a_build_and_not_for_a_cached_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from anahd.gpu import trt as finder
+
+    heard: list[str] = []
+    engine.set_build_notice(heard.append)
+
+    class Logger:
+        ERROR = 0
+
+        def __init__(self, *_a: object) -> None: ...
+
+    fake = type("FakeTensorRT", (), {"Logger": Logger})  # has no Builder: a build fails
+    monkeypatch.setattr(finder, "module", lambda: fake)
+    monkeypatch.setattr(finder, "engine_cache_dir", lambda _gpu=None: tmp_path)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _d=None: "gpu")
+    try:
+        with pytest.raises(Exception):  # noqa: B017 - the fake TensorRT cannot build
+            engine.Engine(torch.nn.Identity(), torch.zeros(1), "k")
+        assert heard == [engine.BUILD_NOTICE]
+        (tmp_path / "j.engine").write_bytes(b"x")
+        heard.clear()
+        with pytest.raises(Exception):  # noqa: B017 - nor load one
+            engine.Engine(torch.nn.Identity(), torch.zeros(1), "j")
+        assert heard == []
+    finally:
+        engine.set_build_notice(None)
 
 
 def test_the_marker_is_for_this_gpu_and_software_and_not_written_after_a_failure(
@@ -124,16 +153,3 @@ def test_the_marker_is_for_this_gpu_and_software_and_not_written_after_a_failure
 def test_the_stamp_is_the_same_every_time() -> None:
     assert engine.compile_stamp() == engine.compile_stamp()
     assert len(engine.compile_stamp()) == 12
-
-
-def test_the_installed_app_compiles_only_when_triton_has_what_it_needs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    pytest.importorskip("triton")
-    monkeypatch.delenv("ANAHD_NO_COMPILE", raising=False)
-    monkeypatch.setattr("sys.frozen", True, raising=False)
-    monkeypatch.setattr(engine, "_frozen_can_compile", lambda: False)
-    assert not engine.compile_available()
-    monkeypatch.setattr(engine, "_frozen_can_compile", lambda: True)
-    assert engine.compile_available()

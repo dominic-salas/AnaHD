@@ -30,6 +30,7 @@ def _clean(src: Path, out: Path, cache: Path) -> tuple[float, str]:
         os.environ,
         TORCHINDUCTOR_CACHE_DIR=str(cache / "inductor"),
         TRITON_CACHE_DIR=str(cache / "triton"),
+        ANAHD_COMPILE="1",  # compiling is a test option
         ANAHD_COMPILE_MIN_SECONDS="1",  # this clip is short; the compile is wanted anyway
     )
     began = time.monotonic()

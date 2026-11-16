@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,17 @@ from torch import Tensor, nn
 log = logging.getLogger(__name__)
 
 COMPILE_MODE = "max-autotune-no-cudagraphs"  # graphs are captured around the compiled code
+
+
+_build_notice: Callable[[str], None] | None = None
+BUILD_NOTICE = "Preparing TensorRT for this picture size (first time only)"
+
+
+def set_build_notice(say: Callable[[str], None] | None) -> None:
+    """Hear ``BUILD_NOTICE`` whenever an engine is about to be built (never for one that is
+    loaded from the cache)."""
+    global _build_notice
+    _build_notice = say
 
 
 def cache_dir() -> Path:
@@ -49,6 +59,8 @@ class Engine:
         path = finder.engine_cache_dir(gpu) / f"{key}.engine"
         log_ = trt.Logger(trt.Logger.ERROR)
         if not path.is_file():
+            if _build_notice is not None:
+                _build_notice(BUILD_NOTICE)
             path.parent.mkdir(parents=True, exist_ok=True)
             onnx = path.with_suffix(".onnx")
             with torch.inference_mode():
@@ -94,27 +106,16 @@ def build_engine(model: nn.Module, example: Tensor, key: str) -> Engine | None:
 
 
 def compile_available() -> bool:
-    """Compiling needs Triton and a CUDA GPU (on Windows the triton-windows wheel brings its
-    own C compiler); ``ANAHD_NO_COMPILE=1`` turns it off."""
-    if os.environ.get("ANAHD_NO_COMPILE") or not torch.cuda.is_available():
+    """Compiling is off unless ``ANAHD_COMPILE=1`` (a test option: on a 3-minute flight it
+    measured no faster than TensorRT alone, and the installed app does not carry Triton).
+    It needs Triton and a CUDA GPU."""
+    if os.environ.get("ANAHD_COMPILE") != "1" or not torch.cuda.is_available():
         return False
     try:
-        import triton  # type: ignore[import-untyped, unused-ignore]  # noqa: F401
+        import triton  # type: ignore[import-untyped, import-not-found, unused-ignore]  # noqa: F401
     except ImportError:
         return False
-    return not getattr(sys, "frozen", False) or _frozen_can_compile()
-
-
-def _frozen_can_compile() -> bool:
-    """In the installed app Triton needs the CUDA files and Python's headers and library
-    next to it; when they are not there, compiling would only fail after a wait, so the plain
-    path runs from the start."""
-    try:
-        from triton import windows_utils  # type: ignore[import-untyped, unused-ignore]
-
-        return bool(windows_utils.find_cuda()[0]) and bool(windows_utils.find_python())
-    except Exception:
-        return False
+    return True
 
 
 def use_compile_cache() -> None:
@@ -156,7 +157,7 @@ def compile_stamp() -> str:
     from anahd.gpu import trt as finder
 
     try:
-        import triton  # type: ignore[import-untyped, unused-ignore]
+        import triton  # type: ignore[import-untyped, import-not-found, unused-ignore]
 
         triton_version = str(triton.__version__)
     except ImportError:

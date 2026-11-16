@@ -15,7 +15,6 @@ dependencies = [
     # supplies RAFT-small and its weights. The learned restorer is plain PyTorch.
     "torch>=2.5",
     "torchvision>=0.20",
-    "triton-windows>=3.6,<3.7; sys_platform == 'win32'",  # torch.compile; bundles its own C compiler
     "spandrel>=0.4",                    # loads the SPAN 2x upscaler (classic path's default)
     "onnx>=1.16",                       # hands the networks to TensorRT when it is installed
 ]
@@ -25,6 +24,9 @@ dependencies = [
 app = ["PySide6-Essentials>=6.10"]
 # Optional speed-up: TensorRT runs the upscaler and the restorer faster than PyTorch.
 ai = ["tensorrt-cu12==10.15.*"]
+# Test option (ANAHD_COMPILE=1): compiles the flow step with torch.compile. Not installed
+# with the app; measured no faster than TensorRT alone on a 3-minute flight.
+compile = ["triton-windows>=3.6,<3.7; sys_platform == 'win32'"]
 # Retraining only (anahd.learn): what the SeedVR2 teacher CLI needs. The SeedVR2 code and
 # its weights are an outside checkout; anahd itself never imports any of this.
 train = [

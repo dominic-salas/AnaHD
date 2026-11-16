@@ -170,7 +170,6 @@ def pyinstaller(
             *("--name", name, "--icon", str(icon)),
             *("--distpath", str(out), "--workpath", str(build / "work" / name)),
             *("--specpath", str(build), *excludes, *datas),
-            *("--additional-hooks-dir", str(ROOT / "packaging" / "hooks")),
             str(launcher),
         ],
         check=True,
