@@ -17,6 +17,8 @@ import torch.nn.functional as F
 from torch import Tensor
 from torchvision.models.optical_flow import Raft_Small_Weights, raft_small
 
+from anahd.gpu.engine import mark_compiled, maybe_compile
+
 T = TypeVar("T")
 
 
@@ -62,7 +64,14 @@ class _Corr:
 class Flow:
     """Flow from a centre frame to ``slots`` neighbours, at the size of the flow images."""
 
-    def __init__(self, size: tuple[int, int], slots: int, iters: int, device: torch.device) -> None:
+    def __init__(
+        self,
+        size: tuple[int, int],
+        slots: int,
+        iters: int,
+        device: torch.device,
+        compile: bool = False,
+    ) -> None:
         w, h = size
         self.size = size
         self.pad_w, self.pad_h = (-w) % 8, (-h) % 8
@@ -85,7 +94,10 @@ class Flow:
             (slots, *probe.features.shape[1:]), dtype=probe.features.dtype, device=device
         )
         self._enc_graph, self._enc_out = self._capture(self._encode)
-        self._flow_graph, self._flow_out = self._capture(self._flows)
+        flows = maybe_compile(self._flows, compile)
+        self._flow_graph, self._flow_out = self._capture(flows)
+        if compile:
+            mark_compiled(f"raft_{w}x{h}_{slots}x{iters}", flows)
 
     def _capture(self, fn: Callable[[], T]) -> tuple[torch.cuda.CUDAGraph, T]:
         with torch.inference_mode():

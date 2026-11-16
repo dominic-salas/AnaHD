@@ -15,7 +15,7 @@ runs on your PC.
 
 Left: the recording's picture area upscaled with plain Lanczos. Right: AnaHD. Same frame of a
 daytime flight, with a breakup band across the lower third. Lower: a 1:1 crop of that
-frame at 1440x1080.
+frame at 1920x1440.
 
 > **Built for one pilot's gear.** AnaHD is a personal tool, shared as is. Its learned
 > model was trained on one camera, one video link and one DVR, so on your footage it may
@@ -108,7 +108,7 @@ when you close the window while nothing is being cleaned.
 **Outputs** are named `AnaHD_<recording>.mp4` (with separate parts: `AnaHD_<recording>_part1.mp4`,
 ...). They are never overwritten, and your recordings are never changed: renders go to a
 `.partial.mp4` that is renamed only once its frame count checks out, so a failed or stopped
-run leaves nothing behind. 1440x1080 for 4:3 pictures (1920x1080 for 16:9), the recording's
+run leaves nothing behind. 1440 lines at the picture's own shape: 1920x1440 for 4:3 pictures (2560x1440 for 16:9), the recording's
 frame rate, H.264, with the recording's sound (AAC, kept in sync through cuts and parts).
 
 **Command line** (`anahd-cli.exe` in the install folder, or `anahd` from source):
@@ -155,8 +155,8 @@ AnaHD was built for my own flying. The recordings it was developed and tested on
   protected.
 - **Other DVR formats**: tested on synthetic recordings at 1280x720 (4:3 in bars), 720x480
   NTSC (pixel shape tagged or not), 720x576 PAL at 50 fps, 640x480 MJPEG 4:2:2 (older
-  DVRs) and full-frame 16:9: all come out at the right shape (4:3 as 1440x1080, 16:9 as
-  1920x1080) with every frame, at the recording's frame rate.
+  DVRs) and full-frame 16:9: all come out at the right shape (4:3 as 1920x1440, 16:9 as
+  2560x1440) with every frame, at the recording's frame rate.
 
 **The digital check assumes a burned-in OSD.** If you fly analog with the OSD off, every
 clip will be flagged as digital: use **Include anyway**. If your digital system burns its
@@ -191,8 +191,10 @@ on the GPU:
    colour get it back from them.
 3. **Restore and upscale** (Learned). A 5-frame U-Net (3.0 M parameters) sees the repaired
    frame and its aligned neighbours at -2..+2 and predicts a residual on a bicubic 2x of
-   the frame, then resampled to 1440x1080. (Classic: fusion, destripe and derainbow, then
-   a Lanczos upscale with clamped sharpening.)
+   the frame, giving 1920x1440 (2560x1440 for 16:9) directly. A faint 4 px line pattern the
+   network leaves in its 2x output is filtered out of the luma. (Classic: fusion, destripe
+   and derainbow, then the SPAN 2x upscaler, or a Lanczos upscale with clamped sharpening
+   if that cannot run.)
 4. **Protect the OSD.** OSD pixels keep the current frame instead of a blend of moved
    neighbours, so readouts don't smear or ghost.
 5. **Remaster.** The colour fixes and the look, then the effects you chose
@@ -208,11 +210,14 @@ the raw teacher so fine detail is not averaged away.
 
 ## Speed
 
-On an RTX 4070 Ti, default settings (Learned cleaning and the look, no effects): a 184 s
-flight (11,032 frames, 1280x720 H.265 DVR recording) cleaned to 1440x1080 in 503 s,
-**21.9 fps**, so 8.4 minutes for a 3-minute flight, including start-up, measuring and the
-x264 encode. Each effect adds to that; the settings panel shows each one's cost and the
-estimated speed before you start. Slower cards will be slower.
+On an RTX 4070 Ti, default settings (Learned cleaning and the look, no effects), a 30 s
+1280x720 recording (1,800 frames) is cleaned to 1440 lines in 95 s for a 4:3 picture
+(1920x1440, **18.9 fps**, so about 9.5 minutes for a 3-minute flight) and in 147 s for a 16:9
+picture (2560x1440, **12.3 fps**, about 15 minutes for a 3-minute flight), including
+start-up, measuring and the x264 encode. Each effect adds to that; the settings panel shows
+each one's cost and the estimated speed before you start. Slower cards will be slower.
+Clips of 10 seconds or more also use TensorRT for the restorer (built once per picture size,
+about 10 s) for about 5% more speed.
 
 ## Building from source
 
@@ -250,5 +255,5 @@ install folder under `licenses`.
 - Teacher for the restorer: [SeedVR2](https://github.com/ByteDance-Seed/SeedVR) 7B sharp
   (ByteDance Seed, Apache-2.0), run through
   [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler).
-- `--ai` (optional, from source): [2xNomosUni_span_multijpg_ldl](https://huggingface.co/Phips/2xNomosUni_span_multijpg_ldl)
+- Classic path upscaler (`--no-learned`; `--no-ai` for Lanczos): [2xNomosUni_span_multijpg_ldl](https://huggingface.co/Phips/2xNomosUni_span_multijpg_ldl)
   by Philip Hofmann (CC BY 4.0), a [SPAN](https://github.com/hongyuanyu/SPAN) model.

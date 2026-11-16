@@ -105,7 +105,7 @@ def test_preview_frame_equals_the_rendered_frame(tmp_path: Path) -> None:
         f"\nframe {n} ({w}x{h}): luma mean {dy.mean():.2f}, p99 {np.percentile(dy, 99):.1f}; "
         f"colour blocks {blocks:.2f}"
     )
-    assert (w, h) == (1920, 1080)  # SuperView reached both
+    assert (w, h) == (2560, 1440)  # SuperView reached both
     assert dy.mean() <= 2.0 and np.percentile(dy, 99) <= 12
     assert blocks <= 2.0
     # the comparison can tell settings apart: the defaults' preview is clearly different

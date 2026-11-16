@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from anahd.gpu.engine import build_engine, compile_available, maybe_compile
+
 from .net import build
 
 
 class LearnedRestorer:
     def __init__(
-        self, ckpt: Path, device: torch.device, strength: float = 1.0, graphs: bool = True
+        self,
+        ckpt: Path,
+        device: torch.device,
+        strength: float = 1.0,
+        graphs: bool = True,
+        accelerate: bool = False,
     ) -> None:
         st = torch.load(ckpt, map_location=device, weights_only=True)
         net = build(str(st["size"])).to(device)
@@ -27,15 +35,36 @@ class LearnedRestorer:
         self._graph: torch.cuda.CUDAGraph | None = None
         self._in: Tensor | None = None
         self._out: Tensor | None = None
+        # TensorRT when it can be built, else the compiled network, else plain PyTorch.
+        self.accelerate = accelerate and device.type == "cuda"
+        self._ckpt = ckpt
+        self._fast: dict[tuple[int, ...], Callable[[Tensor], Tensor]] = {}
 
     def __call__(self, stack: Tensor, osd: Tensor | None = None) -> Tensor:
         with torch.inference_mode():
             return self._run(stack, osd)
 
+    def _accelerated(self, x: Tensor) -> Callable[[Tensor], Tensor]:
+        """The faster forward for inputs shaped like ``x`` (built on first use)."""
+        key = tuple(x.shape)
+        if key not in self._fast:
+            stat = self._ckpt.stat()
+            name = f"unet_{self._ckpt.stem}_{stat.st_size}_{'x'.join(map(str, key))}"
+            with torch.inference_mode():
+                engine = build_engine(self.net, x, name)
+            if engine is not None:
+                self._fast[key] = engine.run
+            else:
+                self._fast[key] = maybe_compile(self.net, compile_available())
+        return self._fast[key]
+
     def _forward(self, x: Tensor) -> Tensor:
-        if not self.graphs:
-            out: Tensor = self.net(x)
+        if self.accelerate:
+            out: Tensor = self._accelerated(x)(x)
             return out
+        if not self.graphs:
+            plain: Tensor = self.net(x)
+            return plain
         if self._graph is None or self._in is None or self._in.shape != x.shape:
             self._in = x.clone()
             dev = x.device

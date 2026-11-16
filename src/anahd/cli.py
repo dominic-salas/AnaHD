@@ -114,7 +114,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_false",
         help="leave breakup bands and lost colour as they are",
     )
-    p.add_argument("--ai", action="store_true", help="with --no-learned: SPAN 2x upscale")
+    p.add_argument(
+        "--no-ai",
+        dest="ai",
+        action="store_false",
+        help="with --no-learned: Lanczos upscale instead of the SPAN 2x upscaler",
+    )
     p.add_argument(
         "--learned-strength",
         type=float,

@@ -16,7 +16,7 @@ from anahd.model import weights
 
 def test_ship_config_is_the_default() -> None:
     args = cli._parser().parse_args(["flight.ts"])
-    assert args.learned and args.repair and not args.cpu and not args.ai
+    assert args.learned and args.repair and not args.cpu and args.ai
     assert args.model is None and args.learned_strength == 1.0
     off = cli._parser().parse_args(["flight.ts", "--no-learned", "--no-repair"])
     assert not off.learned and not off.repair
