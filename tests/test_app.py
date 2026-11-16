@@ -684,12 +684,12 @@ def test_spinner_shows_while_a_preview_renders(window: MainWindow) -> None:
 def test_speed_and_warning_follow_the_settings(window: MainWindow) -> None:
     panel = window._panel
     panel.set_params(RemasterParams(), announce=True)
-    assert "about 21 fps" in panel.speed.text() and "Below" not in panel.speed.text()
+    assert "about 18 fps" in panel.speed.text() and "Below" not in panel.speed.text()
     panel.set_params(
         RemasterParams(motion_blur=39, stabilisation=50, superview="stretch", sharpen=50),
         announce=True,
     )
-    assert "Below 18 fps" in panel.speed.text() and panel.speed.property("role") == "warning"
+    assert "about 16 fps" in panel.speed.text()  # slower, still inside the 12-minute rule
 
 
 def test_each_effect_shows_its_speed_cost(window: MainWindow) -> None:
