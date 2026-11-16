@@ -6,8 +6,8 @@ Engines are built once per network, picture size, GPU and TensorRT version and c
 ``%LOCALAPPDATA%\\AnaHD\\inductor`` (the first compile of a new picture size takes about a
 minute and a half, later runs reuse it).
 
-This file is the one place TensorRT is used; :func:`build_engine` is what to swap for a
-different TensorRT loader.
+TensorRT itself is found by :mod:`anahd.gpu.trt` (installed with the app, downloaded into
+the AnaHD folder, or missing); engines share its cache folder per GPU, driver and version.
 """
 
 from __future__ import annotations
@@ -36,13 +36,16 @@ class Engine:
     on a stream and returns its (reused) output buffer."""
 
     def __init__(self, model: nn.Module, example: Tensor, key: str) -> None:
-        import tensorrt as trt
+        from anahd.gpu import trt as finder
 
+        trt = finder.module()
+        if trt is None:
+            raise RuntimeError(finder.status().reason)
         self._in = example.clone()
         with torch.inference_mode():
             self.out: Tensor = model(example).detach().clone()
-        gpu = torch.cuda.get_device_name(example.device).replace(" ", "_")
-        path = cache_dir() / "engines" / f"{key}_{gpu}_trt{trt.__version__}.engine"
+        gpu = torch.cuda.get_device_name(example.device)
+        path = finder.engine_cache_dir(gpu) / f"{key}.engine"
         log_ = trt.Logger(trt.Logger.ERROR)
         if not path.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
