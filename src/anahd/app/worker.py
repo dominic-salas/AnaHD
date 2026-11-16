@@ -32,17 +32,21 @@ def cli_args(
     parts: bool = False,
     learned: bool = True,
     remaster: dict[str, Any] | None = None,
+    digital: bool | None = None,
 ) -> list[str]:
     """The ``anahd`` command line for a clip: the defaults plus its cut markers,
     --parts when each kept part is to be its own file, --no-learned for the classic
     (hand-made) cleaning, and the remaster settings (``RemasterParams.to_dict()``) as
-    --look-* flags: exactly what the app's preview used."""
+    --look-* flags: exactly what the app's preview used. ``digital`` forces the HDZero path
+    (--digital) or the analog one (--analog); None leaves it to the recording."""
     from anahd.cli import remaster_args
     from anahd.remaster import RemasterParams
 
     args = [src, *remaster_args(RemasterParams.from_dict(remaster or {}))]
     if not learned:
         args.append("--no-learned")
+    if digital is not None:
+        args.append("--digital" if digital else "--analog")
     for a, b in cuts:
         args += ["--cut", f"{a:.4f}-{b:.4f}"]
     if parts and cuts:
@@ -58,6 +62,7 @@ def work(
     parts: bool = False,
     learned: bool = True,
     remaster: dict[str, Any] | None = None,
+    digital: bool | None = None,
 ) -> None:
     """The worker process's main: never raises, always ends with "done" or "failed"."""
     messages.put(("stage", "Starting"))
@@ -66,7 +71,9 @@ def work(
 
     bundle.setup()
     try:
-        args = cli._parser().parse_args(cli_args(src, cuts or [], parts, learned, remaster))
+        args = cli._parser().parse_args(
+            cli_args(src, cuts or [], parts, learned, remaster, digital)
+        )
         with cli.keep_awake():
             result, took = cli.render(
                 Path(src),
@@ -128,6 +135,7 @@ class Runner(QObject):
         parts: bool = False,
         learned: bool = True,
         remaster: dict[str, Any] | None = None,
+        digital: bool | None = None,
     ) -> None:
         if self._proc is not None:
             raise RuntimeError("a clip is already being cleaned")
@@ -135,7 +143,16 @@ class Runner(QObject):
         self._queue = self._ctx.Queue()
         self._proc = self._ctx.Process(
             target=work,
-            args=(str(src), str(out), self._queue, list(cuts or []), parts, learned, remaster),
+            args=(
+                str(src),
+                str(out),
+                self._queue,
+                list(cuts or []),
+                parts,
+                learned,
+                remaster,
+                digital,
+            ),
             daemon=True,
         )
         self._proc.start()

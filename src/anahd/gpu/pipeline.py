@@ -26,7 +26,7 @@ from torch import Tensor
 from anahd import snapshot as snap
 from anahd.clean import CleanConfig
 from anahd.errors import AnaHDError, MediaError
-from anahd.gpu import ops
+from anahd.gpu import digital, ops
 from anahd.gpu.breakup import (
     BreakupConfig,
     Detector,
@@ -44,12 +44,16 @@ from anahd.gpu.upscale import Upscaler, make_upscaler, reduce
 from anahd.look import LookConfig
 from anahd.media import Crop, Encoder, VideoInfo, probe, read_raw
 from anahd.model.infer import LearnedRestorer
+from anahd.origin import judge
 from anahd.picture import OSD_FEATHER, OSD_SHOWN_REACH, PictureConfig, osd_alpha, osd_boxes
 from anahd.pipeline import Measured, Options, Result, _windows, measure
 from anahd.remaster.params import RemasterParams
 from anahd.remaster.stage import Frame as RFrame
 from anahd.remaster.stage import Remaster, SteadyWarp
 
+_NO_MOTION = Encoded(
+    torch.zeros(0), torch.zeros(0)
+)  # what a frame holds when no motion is followed
 LEARNED_OFFSETS = (-2, -1, 1, 2)  # neighbours the learned restorer sees, around the centre
 
 
@@ -78,6 +82,9 @@ class GpuConfig:
     # 95 s); the Cleaner treats None as off.
     fast: bool | None = None
     fast_cold: bool = False  # compile even when this picture size was never compiled here
+    # A digital (HDZero) recording: no alignment, repair or analog cleaning, only the upscale
+    # and the look (see anahd.gpu.digital). None: decided from the recording (anahd.origin).
+    digital: bool | None = None
 
 
 @dataclass
@@ -121,7 +128,7 @@ class Prepared:
     y: Tensor  # (H, W) float, full range
     u: Tensor  # (H/2, W/2)
     v: Tensor
-    enc: Encoded
+    enc: Encoded  # empty on the digital path (no motion is followed)
     yb: Tensor  # luma lightly blurred, 0..1, for flow refinement
     noise: Tensor | None = None  # chroma noise (breakup.chroma_noise), when repairing
     strokes: Tensor | None = None  # (H, W) 1 within reach of an OSD stroke shown in it
@@ -203,9 +210,13 @@ class Cleaner:
         self.fill = ops.Filler(
             t(cv2.resize(boxes.astype(np.uint8), small, interpolation=nearest) > 0)
         )
-        warm = compile_is_warm(f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}")
-        compile_flow = gcfg.fast is True and (gcfg.fast_cold or warm)
-        self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device, compile_flow)
+        self.flow: Flow | None = None
+        if not gcfg.digital:
+            warm = compile_is_warm(
+                f"raft_{small[0]}x{small[1]}_{2 * clean.radius}x{gcfg.flow_iters}"
+            )
+            compile_flow = gcfg.fast is True and (gcfg.fast_cold or warm)
+            self.flow = Flow(small, 2 * clean.radius, gcfg.flow_iters, device, compile_flow)
         self.curve = t(curve.astype(np.float32))
         ys, xs = torch.meshgrid(
             torch.arange(h, device=device, dtype=torch.float32),
@@ -229,11 +240,11 @@ class Cleaner:
         self.ycc709 = (
             torch.from_numpy(np.linalg.inv(_ycc_matrix(0.2126, 0.0722))).float().to(device)
         )
-        repair = gcfg.repair and self.params.static_repair > 0
+        repair = gcfg.repair and self.params.static_repair > 0 and not gcfg.digital
         self.judged = (~t(boxes)).float()
         self.detector = Detector(self.judged, gcfg.breakup) if repair else None
         self.learned: LearnedRestorer | None = None
-        if gcfg.learned is not None:
+        if gcfg.learned is not None and not gcfg.digital:
             # Full strength here: the clean-up sliders mix it with the plain frame (_mix).
             self.learned = LearnedRestorer(gcfg.learned, device, 1.0, accelerate=gcfg.fast is True)
         # The restorer upscales by itself; without it (or at 1x) the SPAN model does, and
@@ -308,14 +319,21 @@ class Cleaner:
         small = self.fill(small)
         noise = None if self.detector is None else chroma_noise(u, v)  # once per frame
         yb = ops.gaussian(y, 1.0) / 255.0
-        return Prepared(y, u, v, self.flow.encode(small), yb, noise, self.osd_strokes(y))
+        enc = _NO_MOTION if self.flow is None else self.flow.encode(small)
+        return Prepared(y, u, v, enc, yb, noise, self.osd_strokes(y))
+
+    def _flow(self) -> Flow:
+        if self.flow is None:
+            raise AnaHDError("the digital path follows no motion")
+        return self.flow
 
     def align(self, centre: Prepared, neighbours: list[tuple[int, Prepared]]) -> Aligned:
         """Each neighbour warped onto the centre (``neighbours`` must not be empty)."""
         cfg = self.cfg
         h, w = self.h, self.w
-        slots = self.flow.slots
-        flows = self.flow.flows(centre.enc, [nb.enc for _, nb in neighbours])
+        flow = self._flow()
+        slots = flow.slots
+        flows = flow.flows(centre.enc, [nb.enc for _, nb in neighbours])
         n = len(neighbours)
         idx = [min(i, n - 1) for i in range(slots)]
         offsets = [neighbours[i][0] for i in idx]
@@ -338,7 +356,7 @@ class Cleaner:
         """(S, 1, 1) distance weights for the neighbours at ``offsets``, 0 for missing slots;
         built once per window shape."""
         if offsets not in self._dist_cache:
-            dist = torch.zeros(self.flow.slots, 1, 1)
+            dist = torch.zeros(self._flow().slots, 1, 1)
             for i, d in enumerate(offsets):
                 dist[i, 0, 0] = max(0.0, 1.0 - self.cfg.distance_falloff * abs(d))
             self._dist_cache[offsets] = dist.to(self.dev)
@@ -815,6 +833,9 @@ class Cleaner:
     ) -> tuple[Tensor, Tensor, Tensor]:
         """The cleaned picture before the look and the upscale: fusion (after repair, when
         on), destripe and derainbow. Full-range planes in 0..255, chroma at half size."""
+        if self.gcfg.digital:
+            self.last_flow = None
+            return digital.restore(centre.y, centre.u, centre.v)
         a: Aligned | None = None
         if neighbours:
             a = self.align(centre, neighbours)
@@ -1139,12 +1160,19 @@ def enhance(
         raise AnaHDError("--steady runs on the CPU only; add --cpu")
     device = cuda_device()
     info = probe(src)
-    gcfg = _with_speedups(gcfg or GpuConfig(), info, opts)
+    gcfg = gcfg or GpuConfig()
     if measured is None:
         say("Measuring the picture area and OSD")
     meas = measured or measure(src, info, opts)
-    say("Loading the models")
     params = opts.remaster
+    if gcfg.digital is None:
+        gcfg = replace(gcfg, digital=judge(info, meas).hdzero)
+    if gcfg.digital:
+        gcfg = digital.config(gcfg)
+        meas, params = digital.without_overlay(meas), digital.params_for(params)
+        opts = replace(opts, clean=replace(opts.clean, radius=0))  # no neighbours are used
+    gcfg = _with_speedups(gcfg, info, opts)
+    say("Loading the models")
     cleaner = Cleaner(
         meas.crop,
         meas.osd,
