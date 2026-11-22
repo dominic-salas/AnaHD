@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- **The mouse side buttons move between pages.** Back goes from Results to Clips and Forward
+  from Clips to Results (once a clip is cleaned), in the app and when it runs inside okFPV.
+
 ## 0.2.0 (2026-11-16)
 
 - **Compiling is off.** Compiling the flow step (Triton) measured no faster than TensorRT
