@@ -22,8 +22,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import QItemSelectionModel, QLocale, QSettings, Qt, QTime
-from PySide6.QtGui import QAction, QCloseEvent, QImage, QPixmap
+from PySide6.QtCore import (
+    QEvent,
+    QItemSelectionModel,
+    QLocale,
+    QObject,
+    QSettings,
+    Qt,
+    QTime,
+)
+from PySide6.QtGui import QAction, QCloseEvent, QImage, QKeyEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -1470,6 +1478,59 @@ class MainWindow(QMainWindow):
         self._tray.hide()
 
 
+class SideButtons(QObject):
+    """Makes a mouse's side buttons step between the pages: Back goes from Results to Clips,
+    Forward from Clips to Results (when there is something to show).
+
+    It sees every event in the app, so it works the same standalone and embedded in a host.
+    Some mouse drivers send the buttons as Key_Back / Key_Forward instead of mouse buttons;
+    a key arriving right after a side-button press is the same click and is ignored."""
+
+    SAME_CLICK_S = 0.05
+
+    def __init__(self, window: MainWindow) -> None:
+        super().__init__(window)
+        self._window = window
+        self._pressed_at = -1.0
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        kind = event.type()
+        if kind in (
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonDblClick,
+            QEvent.Type.MouseButtonRelease,
+        ) and isinstance(event, QMouseEvent):
+            button = event.button()
+            if button not in (Qt.MouseButton.BackButton, Qt.MouseButton.ForwardButton):
+                return False
+            if not self._mine(watched):
+                return False
+            if kind != QEvent.Type.MouseButtonRelease:
+                self._pressed_at = time.monotonic()
+                self._step(-1 if button == Qt.MouseButton.BackButton else 1)
+            return True  # the release is swallowed too, so no widget sees half a click
+        if kind == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            key = event.key()
+            if key not in (Qt.Key.Key_Back, Qt.Key.Key_Forward) or not self._mine(watched):
+                return False
+            if not event.isAutoRepeat() and (
+                time.monotonic() - self._pressed_at >= self.SAME_CLICK_S
+            ):
+                self._step(-1 if key == Qt.Key.Key_Back else 1)
+            return True
+        return False
+
+    def _mine(self, watched: QObject) -> bool:
+        return isinstance(watched, QWidget) and watched.window() is self._window
+
+    def _step(self, direction: int) -> None:
+        shown = self._window._pages.currentIndex()
+        if direction < 0 and shown == RESULTS_PAGE:
+            self._window._go(CLIPS_PAGE)
+        elif direction > 0 and shown == CLIPS_PAGE:
+            self._window._go(RESULTS_PAGE)  # stays put unless a clip is done
+
+
 def run(argv: Sequence[str]) -> int:
     bundle.setup()
     app = QApplication(list(argv))
@@ -1480,6 +1541,7 @@ def run(argv: Sequence[str]) -> int:
     app.setQuitOnLastWindowClosed(False)  # hiding to the tray must not end the app
     settings = QSettings("AnaHD", "AnaHD")
     window = MainWindow(settings)
+    app.installEventFilter(SideButtons(window))
     # Recordings dropped on the shortcut open on the clips page, to be checked and cut
     # before CLEAN (they are not cleaned straight away).
     window.add_paths([Path(arg) for arg in argv[1:]])

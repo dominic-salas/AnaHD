@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QStyleOptionViewItem,
+    QWidget,
 )
 
 from anahd.app import worker
@@ -45,10 +46,12 @@ from anahd.app.window import (
     CLEANING,
     CLIPS_PAGE,
     DONE,
+    DROP_PAGE,
     RESULTS_PAGE,
     WAITING,
     Clip,
     MainWindow,
+    SideButtons,
     videos_in,
 )
 from anahd.remaster import RemasterParams
@@ -1086,3 +1089,105 @@ def test_the_speed_estimate_learns_this_pc_from_long_completed_runs(
     window._panel.reset_button.click()
     assert window._speed_ratio(learned) is None
     assert f"about {base:.0f} fps" in window._panel.speed.text()
+
+
+# ----- mouse side buttons -----
+
+
+@pytest.fixture
+def sidebuttons(window: MainWindow, tmp_path: Path) -> Iterator[MainWindow]:
+    """The window with the side-button handler installed as in the real app, one clip
+    waiting and one already cleaned."""
+    handler = SideButtons(window)
+    QApplication.instance().installEventFilter(handler)  # type: ignore[union-attr]
+    window._side_buttons = handler  # type: ignore[attr-defined]
+    (tmp_path / "AnaHD_a.mp4").write_bytes(b"earlier render")
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    (tmp_path / "b.mp4").write_bytes(b"x")
+    window.add_paths([tmp_path / "a.mp4", tmp_path / "b.mp4"])
+    window.show()
+    yield window
+    QApplication.instance().removeEventFilter(handler)  # type: ignore[union-attr]
+
+
+def _shown(window: MainWindow) -> QWidget:
+    page = window._pages.currentWidget()
+    assert page is not None
+    return page
+
+
+def _side_click(window: MainWindow, button: Qt.MouseButton) -> None:
+    QTest.mouseClick(_shown(window), button)
+
+
+def test_back_goes_from_results_to_clips_and_forward_returns(sidebuttons: MainWindow) -> None:
+    win = sidebuttons
+    win._go(CLIPS_PAGE)
+    _side_click(win, Qt.MouseButton.ForwardButton)
+    assert win._pages.currentIndex() == RESULTS_PAGE
+    _side_click(win, Qt.MouseButton.BackButton)
+    assert win._pages.currentIndex() == CLIPS_PAGE
+
+
+def test_back_and_forward_keys_do_the_same(sidebuttons: MainWindow) -> None:
+    win = sidebuttons
+    win._go(CLIPS_PAGE)
+    QTest.keyClick(_shown(win), Qt.Key.Key_Forward)
+    assert win._pages.currentIndex() == RESULTS_PAGE
+    QTest.keyClick(_shown(win), Qt.Key.Key_Back)
+    assert win._pages.currentIndex() == CLIPS_PAGE
+
+
+def test_one_click_that_also_sends_a_key_acts_once(
+    sidebuttons: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win = sidebuttons
+    win._go(CLIPS_PAGE)
+    _side_click(win, Qt.MouseButton.ForwardButton)
+    QTest.keyClick(_shown(win), Qt.Key.Key_Forward)  # the driver's twin
+    assert win._pages.currentIndex() == RESULTS_PAGE
+    # Back from results, then a key twin right after must not go any further or bounce.
+    _side_click(win, Qt.MouseButton.BackButton)
+    QTest.keyClick(_shown(win), Qt.Key.Key_Back)
+    assert win._pages.currentIndex() == CLIPS_PAGE
+    # A key on its own, well after the click, still counts.
+    monkeypatch.setattr(win._side_buttons, "_pressed_at", -1.0)  # type: ignore[attr-defined]
+    QTest.keyClick(_shown(win), Qt.Key.Key_Forward)
+    assert win._pages.currentIndex() == RESULTS_PAGE
+
+
+def test_side_buttons_do_nothing_on_the_drop_page(window: MainWindow) -> None:
+    handler = SideButtons(window)
+    QApplication.instance().installEventFilter(handler)  # type: ignore[union-attr]
+    try:
+        window.show()
+        assert window._pages.currentIndex() == DROP_PAGE
+        for button in (Qt.MouseButton.BackButton, Qt.MouseButton.ForwardButton):
+            QTest.mouseClick(_shown(window), button)
+        assert window._pages.currentIndex() == DROP_PAGE
+    finally:
+        QApplication.instance().removeEventFilter(handler)  # type: ignore[union-attr]
+
+
+def test_forward_stays_put_when_nothing_is_cleaned(window: MainWindow, tmp_path: Path) -> None:
+    handler = SideButtons(window)
+    QApplication.instance().installEventFilter(handler)  # type: ignore[union-attr]
+    try:
+        (tmp_path / "only.mp4").write_bytes(b"x")
+        window.add_paths([tmp_path / "only.mp4"])
+        window.show()
+        assert window._pages.currentIndex() == CLIPS_PAGE
+        QTest.mouseClick(_shown(window), Qt.MouseButton.ForwardButton)
+        assert window._pages.currentIndex() == CLIPS_PAGE
+    finally:
+        QApplication.instance().removeEventFilter(handler)  # type: ignore[union-attr]
+
+
+def test_side_button_over_the_preview_does_not_move_the_divider(sidebuttons: MainWindow) -> None:
+    win = sidebuttons
+    win._go(RESULTS_PAGE)
+    wipe = win._results_page.findChildren(Wipe)[0]
+    before = wipe._split
+    QTest.mouseClick(wipe, Qt.MouseButton.BackButton, pos=QPoint(3, 3))
+    assert wipe._split == before
+    assert win._pages.currentIndex() == CLIPS_PAGE
