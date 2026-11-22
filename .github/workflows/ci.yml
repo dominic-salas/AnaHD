@@ -34,7 +34,8 @@ jobs:
 
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        # The same FFmpeg release the installer ships (scripts/third_party.py). 9.1.0 hangs in test_audio.
+        run: choco install ffmpeg --version=9.0.2 -y --no-progress
 
       # PyTorch (CUDA, ~2.5 GB) is left out: no GPU here, and the tests that need it skip.
       - name: Install dependencies
